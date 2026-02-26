@@ -215,20 +215,20 @@ cargo doc --no-deps            # 文档生成成功
 ```
 
 **验收清单：**
-- [ ] `cargo check` 无错误无警告
-- [ ] `cargo test` 全部通过（预计 40+ 个测试用例）
-- [ ] 所有结构体使用 `#[serde(rename_all = "camelCase")]`，JSON 输出字段名与 railpack 一致
-- [ ] BuildPlan 可 JSON 序列化/反序列化往返，空字段自动跳过
-- [ ] Command 枚举使用 `#[serde(untagged)]`，JSON 格式按字段区分（与 railpack 一致，无 type 标签）
-- [ ] `command_type()` 返回值：Path 变体返回 `"globalPath"`（非 `"path"`）
-- [ ] Spreadable trait 由 Command 和 Layer 实现，`spread()` 泛型函数可用
-- [ ] PlanPackages 含 `apt` + `mise` 两个字段（非 HashMap 别名）
-- [ ] `Step::new()` 默认 secrets = `["*"]`
-- [ ] `BuildPlan::normalize()` 可移除空输入和孤立步骤
-- [ ] DockerignoreContext 可正确解析 .dockerignore（含 `!` 否定模式）
-- [ ] App 可读取临时目录中的文件，glob 结果被缓存
-- [ ] Environment `get_config_variable` 返回 (value, variable_name) 二元组
-- [ ] Environment `from_envs` 可解析 `KEY=VALUE` 字符串列表
-- [ ] Config 从 arcpack.json 加载成功，缺失文件返回默认空配置
-- [ ] ArcpackError 所有变体可构造，Display 输出人类可读信息
-- [ ] `src/lib.rs` 声明了所有模块（plan/app/config/error），公共类型通过 `pub use` 导出
+- [x] `cargo check` 无错误无警告
+- [x] `cargo test` 全部通过（预计 40+ 个测试用例）
+- [x] 所有结构体使用 `#[serde(rename_all = "camelCase")]`，JSON 输出字段名与 railpack 一致
+- [x] BuildPlan 可 JSON 序列化/反序列化往返，空字段自动跳过
+- [x] Command 枚举使用 `#[serde(untagged)]`，JSON 格式按字段区分（与 railpack 一致，无 type 标签）
+- [x] `command_type()` 返回值：Path 变体返回 `"globalPath"`（非 `"path"`）
+- [x] Spreadable trait 由 Command 和 Layer 实现，`spread()` 泛型函数可用
+- [x] PlanPackages 含 `apt` + `mise` 两个字段（非 HashMap 别名）
+- [x] `Step::new()` 默认 secrets = `["*"]`
+- [x] `BuildPlan::normalize()` 可移除空输入和孤立步骤
+- [x] DockerignoreContext 可正确解析 .dockerignore（含 `!` 否定模式）
+- [x] App 可读取临时目录中的文件，glob 结果被缓存
+- [x] Environment `get_config_variable` 返回 (value, variable_name) 二元组
+- [x] Environment `from_envs` 可解析 `KEY=VALUE` 字符串列表
+- [x] Config 从 arcpack.json 加载成功，缺失文件返回默认空配置
+- [x] ArcpackError 所有变体可构造，Display 输出人类可读信息
+- [x] `src/lib.rs` 声明了所有模块（plan/app/config/error），公共类型通过 `pub use` 导出

@@ -18,3 +18,8 @@ Thumbs.db
 
 # BuildKit
 *.sock
+
+# Logs
+*.log
+
+/railpack/

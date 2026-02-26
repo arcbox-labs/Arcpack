@@ -29,7 +29,7 @@ Provider 支持范围：Node.js / Python / Go / Rust / Java / 静态网站 / Doc
 
 ## 项目约定
 
-- 代码注释使用中文
+- 只有代码注释使用中文
 - commit message 使用英文
 - 设计文档放在 `docs/` 目录下
 - 重要：方案设计和编码时，始终参考 [Railpack](https://github.com/railwayapp/railpack) 的实现作为基准
