@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 /// 构建元数据：记录构建过程中的键值信息
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Metadata {
     pub properties: HashMap<String, String>,
 }
@@ -36,12 +36,6 @@ impl Metadata {
     /// 转为 HashMap
     pub fn to_map(&self) -> HashMap<String, String> {
         self.properties.clone()
-    }
-}
-
-impl Default for Metadata {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

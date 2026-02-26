@@ -98,24 +98,83 @@ impl Config {
         Self::default()
     }
 
-    /// 从 App + Environment 加载配置
+    /// 从 CLI 选项生成配置
     ///
-    /// 合并文件配置 + 环境变量配置（环境变量优先）。
+    /// 对齐 railpack `core/core.go GenerateConfigFromOptions`
+    pub fn from_options(
+        build_command: &Option<String>,
+        start_command: &Option<String>,
+    ) -> Self {
+        let mut config = Self::empty();
+
+        if let Some(ref cmd) = build_command {
+            if !cmd.is_empty() {
+                let step_config = StepConfig {
+                    step: Step {
+                        commands: vec![
+                            Command::new_copy(".", "."),
+                            Command::new_exec_shell(cmd),
+                        ],
+                        ..Step::new("build")
+                    },
+                    ..Default::default()
+                };
+                config.steps.insert("build".to_string(), step_config);
+            }
+        }
+
+        if let Some(ref cmd) = start_command {
+            if !cmd.is_empty() {
+                config
+                    .deploy
+                    .get_or_insert_with(DeployConfig::default)
+                    .start_cmd = Some(cmd.clone());
+            }
+        }
+
+        config
+    }
+
+    /// 从 App + Environment + 可选配置文件路径加载配置
+    ///
+    /// 三路合并：options < env < file（文件优先级最高）。
+    /// 对齐 railpack `core/core.go GetConfig`。
     /// 缺失配置文件返回默认空 Config。
-    pub fn load(app: &App, env: &Environment) -> Result<Self> {
-        let file_config = Self::load_from_file(app)?;
+    pub fn load(
+        app: &App,
+        env: &Environment,
+        options_config: Self,
+        config_file_path: &Option<String>,
+    ) -> Result<Self> {
+        let file_config = Self::load_from_file(app, config_file_path)?;
         let env_config = Self::load_from_environment(env);
 
-        Ok(Self::merge(&file_config, &env_config))
+        // 三路合并：options < env < file
+        let merged = Self::merge(&options_config, &env_config);
+        Ok(Self::merge(&merged, &file_config))
     }
 
     /// 从配置文件加载
-    fn load_from_file(app: &App) -> Result<Self> {
-        if !app.has_file(DEFAULT_CONFIG_FILE) {
+    ///
+    /// 支持自定义配置文件路径。未指定时使用默认 arcpack.json。
+    /// 明确指定不存在的配置文件会报错；默认文件不存在返回空 Config。
+    fn load_from_file(app: &App, config_file_path: &Option<String>) -> Result<Self> {
+        let (file_name, is_custom) = match config_file_path {
+            Some(ref path) if !path.is_empty() => (path.as_str(), true),
+            _ => (DEFAULT_CONFIG_FILE, false),
+        };
+
+        if !app.has_file(file_name) {
+            if is_custom {
+                return Err(crate::ArcpackError::ConfigParse {
+                    path: file_name.to_string(),
+                    message: "配置文件不存在".to_string(),
+                });
+            }
             return Ok(Self::empty());
         }
 
-        app.read_json(DEFAULT_CONFIG_FILE)
+        app.read_json(file_name)
     }
 
     /// 从环境变量加载
@@ -290,7 +349,7 @@ mod tests {
 
         let app = App::new(dir.path()).unwrap();
         let env = Environment::default();
-        let config = Config::load(&app, &env).unwrap();
+        let config = Config::load(&app, &env, Config::empty(), &None).unwrap();
 
         assert_eq!(config.provider, Some("node".to_string()));
         assert_eq!(config.build_apt_packages, vec!["curl", "git"]);
@@ -306,7 +365,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let app = App::new(dir.path()).unwrap();
         let env = Environment::default();
-        let config = Config::load(&app, &env).unwrap();
+        let config = Config::load(&app, &env, Config::empty(), &None).unwrap();
 
         assert_eq!(config, Config::empty());
     }
@@ -318,7 +377,7 @@ mod tests {
 
         let app = App::new(dir.path()).unwrap();
         let env = Environment::default();
-        let result = Config::load(&app, &env);
+        let result = Config::load(&app, &env, Config::empty(), &None);
 
         assert!(result.is_err());
         assert!(matches!(
@@ -368,7 +427,7 @@ mod tests {
         let mut env = Environment::default();
         env.set_variable("ARCPACK_START_CMD", "node server.js");
 
-        let config = Config::load(&app, &env).unwrap();
+        let config = Config::load(&app, &env, Config::empty(), &None).unwrap();
         assert_eq!(
             config.deploy.as_ref().unwrap().start_cmd,
             Some("node server.js".to_string())
@@ -408,7 +467,7 @@ mod tests {
         let mut env = Environment::default();
         env.set_variable("ARCPACK_START_CMD", "node server.js");
 
-        let config = Config::load(&app, &env).unwrap();
+        let config = Config::load(&app, &env, Config::empty(), &None).unwrap();
         let deploy = config.deploy.as_ref().expect("deploy should exist");
 
         // base 来自文件，未被覆盖
@@ -446,5 +505,135 @@ mod tests {
         let json = serde_json::to_string_pretty(&config).unwrap();
         let parsed: Config = serde_json::from_str(&json).unwrap();
         assert_eq!(config, parsed);
+    }
+
+    #[test]
+    fn test_from_options_build_command() {
+        let config = Config::from_options(
+            &Some("make build".to_string()),
+            &None,
+        );
+        assert!(config.steps.contains_key("build"));
+        let build_step = &config.steps["build"];
+        assert_eq!(build_step.step.commands.len(), 2);
+    }
+
+    #[test]
+    fn test_from_options_start_command() {
+        let config = Config::from_options(
+            &None,
+            &Some("node server.js".to_string()),
+        );
+        assert_eq!(
+            config.deploy.as_ref().unwrap().start_cmd,
+            Some("node server.js".to_string())
+        );
+    }
+
+    #[test]
+    fn test_from_options_empty_strings_ignored() {
+        let config = Config::from_options(
+            &Some("".to_string()),
+            &Some("".to_string()),
+        );
+        assert!(config.steps.is_empty());
+        assert!(config.deploy.is_none());
+    }
+
+    #[test]
+    fn test_load_custom_config_file_path() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("custom.json"),
+            r#"{ "provider": "node" }"#,
+        )
+        .unwrap();
+
+        let app = App::new(dir.path()).unwrap();
+        let env = Environment::default();
+        let config = Config::load(
+            &app,
+            &env,
+            Config::empty(),
+            &Some("custom.json".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(config.provider, Some("node".to_string()));
+    }
+
+    #[test]
+    fn test_load_custom_config_file_missing_returns_error() {
+        let dir = TempDir::new().unwrap();
+        let app = App::new(dir.path()).unwrap();
+        let env = Environment::default();
+
+        let result = Config::load(
+            &app,
+            &env,
+            Config::empty(),
+            &Some("nonexistent.json".to_string()),
+        );
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ArcpackError::ConfigParse { .. }
+        ));
+    }
+
+    #[test]
+    fn test_three_way_merge_priority() {
+        // options 设置 start_command，file 设置 provider
+        // 结果应包含两者（file > env > options）
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("arcpack.json"),
+            r#"{ "provider": "node" }"#,
+        )
+        .unwrap();
+
+        let app = App::new(dir.path()).unwrap();
+        let env = Environment::default();
+        let options_config = Config::from_options(
+            &None,
+            &Some("node server.js".to_string()),
+        );
+
+        let config = Config::load(&app, &env, options_config, &None).unwrap();
+
+        // provider 来自文件
+        assert_eq!(config.provider, Some("node".to_string()));
+        // start_cmd 来自 options（文件未设置，不会覆盖）
+        assert_eq!(
+            config.deploy.as_ref().unwrap().start_cmd,
+            Some("node server.js".to_string())
+        );
+    }
+
+    #[test]
+    fn test_file_config_overrides_options() {
+        // options 和 file 都设置 start_command，file 胜出
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("arcpack.json"),
+            r#"{ "deploy": { "startCommand": "npm start" } }"#,
+        )
+        .unwrap();
+
+        let app = App::new(dir.path()).unwrap();
+        let env = Environment::default();
+        let options_config = Config::from_options(
+            &None,
+            &Some("node server.js".to_string()),
+        );
+
+        let config = Config::load(&app, &env, options_config, &None).unwrap();
+
+        // file 优先级更高
+        assert_eq!(
+            config.deploy.as_ref().unwrap().start_cmd,
+            Some("npm start".to_string())
+        );
     }
 }

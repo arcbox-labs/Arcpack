@@ -270,14 +270,7 @@ impl GenerateContext {
 
             if let Some(idx) = existing_idx {
                 if let Some(csb) = self.steps[idx].as_any_mut().downcast_mut::<CommandStepBuilder>() {
-                    csb.inputs = spread(config_step.step.inputs.clone(), csb.inputs.clone());
-                    csb.commands = spread(config_step.step.commands.clone(), csb.commands.clone());
-                    csb.secrets = spread_strings(config_step.step.secrets.clone(), csb.secrets.clone());
-                    csb.caches = spread_strings(config_step.step.caches.clone(), csb.caches.clone());
-                    csb.add_env_vars(&config_step.step.variables);
-                    for (k, v) in &config_step.step.assets {
-                        csb.assets.insert(k.clone(), v.clone());
-                    }
+                    csb.merge_from_config_step(&config_step.step);
                 }
             } else {
                 // 创建新的 CommandStepBuilder
@@ -286,14 +279,7 @@ impl GenerateContext {
                 if let Some(ref mise) = self.mise_step_builder {
                     csb.add_input(Layer::new_step_layer(mise.name(), None));
                 }
-                csb.inputs = spread(config_step.step.inputs.clone(), csb.inputs.clone());
-                csb.commands = spread(config_step.step.commands.clone(), csb.commands.clone());
-                csb.secrets = spread_strings(config_step.step.secrets.clone(), csb.secrets.clone());
-                csb.caches = spread_strings(config_step.step.caches.clone(), csb.caches.clone());
-                csb.add_env_vars(&config_step.step.variables);
-                for (k, v) in &config_step.step.assets {
-                    csb.assets.insert(k.clone(), v.clone());
-                }
+                csb.merge_from_config_step(&config_step.step);
                 self.steps.push(Box::new(csb));
             }
 

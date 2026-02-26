@@ -59,7 +59,7 @@ fn generate_plan_from_fixture(
 
     let app = App::new(&fixture_path)?;
     let env = Environment::new(HashMap::new());
-    let config = Config::load(&app, &env)?;
+    let config = Config::load(&app, &env, Config::empty(), &None)?;
 
     // 检测 Provider
     let mut provider_to_use: Option<Box<dyn provider::Provider>> = None;

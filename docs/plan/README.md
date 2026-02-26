@@ -23,7 +23,7 @@
 |-------|------|--------|------|
 | [Phase 1: 基础数据结构](./phase-1-data-structures.md) | `phase-1-data-structures.md` | 7 | 核心数据结构可编译可序列化 |
 | [Phase 2: Provider 框架 + Node.js](./phase-2-provider-framework.md) | `phase-2-provider-framework.md` | 9 | Node.js BuildPlan 生成成功 |
-| [Phase 3: CLI](./phase-3-cli.md) | `phase-3-cli.md` | 5 | CLI 可独立使用 |
+| [Phase 3: CLI](./phase-3-cli.md) | `phase-3-cli.md` | 6 | CLI 可独立使用 |
 | [Phase 4: BuildKit 集成](./phase-4-buildkit.md) | `phase-4-buildkit.md` | 8 | OCI 镜像端到端构建成功 |
 | [Phase 5: 更多 Provider](./phase-5-providers.md) | `phase-5-providers.md` | 7 | 覆盖 7 种语言/场景 |
 
@@ -35,10 +35,10 @@
 |-------|--------|------------|----------|
 | Phase 1: 基础数据结构 | 7 | ~35 | 核心数据结构可编译可序列化 |
 | Phase 2: Provider 框架 + Node.js | 9 | ~50 | Node.js BuildPlan 生成成功 |
-| Phase 3: CLI | 5 | ~20 | CLI 可独立使用 |
+| Phase 3: CLI | 6 | ~30 | CLI 可独立使用 |
 | Phase 4: BuildKit 集成 | 8 | ~40 | OCI 镜像端到端构建成功 |
 | Phase 5: 更多 Provider | 7 | ~60 | 覆盖 7 种语言/场景 |
-| **合计** | **36** | **~205** | |
+| **合计** | **37** | **~215** | |
 
 ## 全局风险与缓解
 

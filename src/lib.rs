@@ -71,7 +71,7 @@ pub struct BuildResult {
 /// 编排流程：
 /// 1. App::new(source)
 /// 2. Environment::new(env_vars)
-/// 3. Config::load(&app, &env)
+/// 3. Config::load(&app, &env, options_config, config_file_path)
 /// 4. 检测 Provider（含 Config 强制指定）
 /// 5. GenerateContext::new(app, env, config, version_resolver)
 /// 6. provider.initialize(&mut ctx)
@@ -87,7 +87,8 @@ pub fn generate_build_plan(
 ) -> Result<BuildResult> {
     let app = App::new(source)?;
     let env = Environment::new(env_vars);
-    let config = Config::load(&app, &env)?;
+    let options_config = Config::from_options(&options.build_command, &options.start_command);
+    let config = Config::load(&app, &env, options_config, &options.config_file_path)?;
 
     // 检测 Provider
     let mut provider_to_use = detect_provider(&app, &env, &config)?;
@@ -139,10 +140,9 @@ fn detect_provider(
 ) -> Result<Box<dyn provider::Provider>> {
     // Config 强制指定
     if let Some(ref provider_name) = config.provider {
-        if let Some(p) = provider::get_provider(provider_name) {
-            return Ok(p);
-        }
-        // 指定了不存在的 Provider，回退到自动检测
+        return provider::get_provider(provider_name).ok_or_else(|| {
+            ArcpackError::UnknownProvider { name: provider_name.clone() }
+        });
     }
 
     // 自动检测

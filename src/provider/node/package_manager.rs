@@ -121,7 +121,7 @@ impl PackageManagerKind {
             }
             PackageManagerKind::Pnpm => {
                 if !using_corepack {
-                    install.add_env_vars(&HashMap::from([
+                    install.add_variables(&HashMap::from([
                         ("PNPM_HOME".to_string(), "/pnpm".to_string()),
                     ]));
                     install.add_paths(&["/pnpm".to_string()]);
@@ -137,10 +137,20 @@ impl PackageManagerKind {
                 }
             }
             PackageManagerKind::Bun => {
-                install.add_command(Command::new_exec("bun install --frozen-lockfile"));
+                let has_lockfile = app.has_file("bun.lockb") || app.has_file("bun.lock");
+                if has_lockfile {
+                    install.add_command(Command::new_exec("bun install --frozen-lockfile"));
+                } else {
+                    install.add_command(Command::new_exec("bun install"));
+                }
             }
             PackageManagerKind::Yarn1 => {
-                install.add_command(Command::new_exec("yarn install --frozen-lockfile"));
+                let has_lockfile = app.has_file("yarn.lock");
+                if has_lockfile {
+                    install.add_command(Command::new_exec("yarn install --frozen-lockfile"));
+                } else {
+                    install.add_command(Command::new_exec("yarn install"));
+                }
             }
             PackageManagerKind::YarnBerry => {
                 install.add_command(Command::new_exec("yarn install --check-cache"));
@@ -254,14 +264,17 @@ impl std::fmt::Display for PackageManagerKind {
     }
 }
 
+/// .yarnrc.yml 配置结构体
+#[derive(serde::Deserialize, Default)]
+struct YarnRc {
+    #[serde(rename = "globalFolder", default)]
+    global_folder: Option<String>,
+    #[serde(rename = "nodeLinker", default)]
+    node_linker: Option<String>,
+}
+
 /// Yarn Berry 全局目录
 fn get_yarn_berry_global_folder(app: &App) -> String {
-    #[derive(serde::Deserialize, Default)]
-    struct YarnRc {
-        #[serde(rename = "globalFolder", default)]
-        global_folder: Option<String>,
-    }
-
     if let Ok(rc) = app.read_yaml::<YarnRc>(".yarnrc.yml") {
         if let Some(ref folder) = rc.global_folder {
             if !folder.is_empty() {
@@ -274,12 +287,6 @@ fn get_yarn_berry_global_folder(app: &App) -> String {
 
 /// Yarn Berry node linker 设置
 fn get_yarn_berry_node_linker(app: &App) -> String {
-    #[derive(serde::Deserialize, Default)]
-    struct YarnRc {
-        #[serde(rename = "nodeLinker", default)]
-        node_linker: Option<String>,
-    }
-
     if let Ok(rc) = app.read_yaml::<YarnRc>(".yarnrc.yml") {
         if let Some(ref linker) = rc.node_linker {
             if !linker.is_empty() {
@@ -344,5 +351,63 @@ mod tests {
         assert_eq!(PackageManagerKind::Npm.cache_type(), CacheType::Shared);
         assert_eq!(PackageManagerKind::Yarn1.cache_type(), CacheType::Locked);
         assert_eq!(PackageManagerKind::YarnBerry.cache_type(), CacheType::Shared);
+    }
+
+    #[test]
+    fn test_bun_install_with_lockfile_uses_frozen() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("bun.lockb"), "").unwrap();
+        let app = App::new(dir.path().to_str().unwrap()).unwrap();
+
+        let mut caches = CacheContext::new();
+        let mut install = CommandStepBuilder::new("install");
+        PackageManagerKind::Bun.install_deps(&app, &mut caches, &mut install, false);
+
+        let cmds: Vec<String> = install.commands.iter().map(|c| format!("{:?}", c)).collect();
+        let cmd_str = cmds.join(" ");
+        assert!(cmd_str.contains("--frozen-lockfile"), "应使用 --frozen-lockfile");
+    }
+
+    #[test]
+    fn test_bun_install_without_lockfile_no_frozen() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let app = App::new(dir.path().to_str().unwrap()).unwrap();
+
+        let mut caches = CacheContext::new();
+        let mut install = CommandStepBuilder::new("install");
+        PackageManagerKind::Bun.install_deps(&app, &mut caches, &mut install, false);
+
+        let cmds: Vec<String> = install.commands.iter().map(|c| format!("{:?}", c)).collect();
+        let cmd_str = cmds.join(" ");
+        assert!(!cmd_str.contains("--frozen-lockfile"), "无锁文件时不应使用 --frozen-lockfile");
+    }
+
+    #[test]
+    fn test_yarn1_install_with_lockfile_uses_frozen() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("yarn.lock"), "").unwrap();
+        let app = App::new(dir.path().to_str().unwrap()).unwrap();
+
+        let mut caches = CacheContext::new();
+        let mut install = CommandStepBuilder::new("install");
+        PackageManagerKind::Yarn1.install_deps(&app, &mut caches, &mut install, false);
+
+        let cmds: Vec<String> = install.commands.iter().map(|c| format!("{:?}", c)).collect();
+        let cmd_str = cmds.join(" ");
+        assert!(cmd_str.contains("--frozen-lockfile"), "应使用 --frozen-lockfile");
+    }
+
+    #[test]
+    fn test_yarn1_install_without_lockfile_no_frozen() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let app = App::new(dir.path().to_str().unwrap()).unwrap();
+
+        let mut caches = CacheContext::new();
+        let mut install = CommandStepBuilder::new("install");
+        PackageManagerKind::Yarn1.install_deps(&app, &mut caches, &mut install, false);
+
+        let cmds: Vec<String> = install.commands.iter().map(|c| format!("{:?}", c)).collect();
+        let cmd_str = cmds.join(" ");
+        assert!(!cmd_str.contains("--frozen-lockfile"), "无锁文件时不应使用 --frozen-lockfile");
     }
 }
