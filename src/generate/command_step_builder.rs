@@ -2,7 +2,7 @@ use std::any::Any;
 use std::collections::HashMap;
 
 use crate::app::environment::Environment;
-use crate::plan::{BuildPlan, Command, Layer, Step};
+use crate::plan::{BuildPlan, Command, Layer, Step, spread, spread_strings};
 use crate::Result;
 
 use super::{BuildStepOptions, StepBuilder};
@@ -62,10 +62,6 @@ impl CommandStepBuilder {
         self.caches.push(name.to_string());
     }
 
-    pub fn add_env_vars(&mut self, env_vars: &HashMap<String, String>) {
-        self.add_variables(env_vars);
-    }
-
     pub fn add_paths(&mut self, paths: &[String]) {
         for path in paths {
             self.commands.push(Command::new_path(path));
@@ -82,6 +78,18 @@ impl CommandStepBuilder {
     pub fn use_secrets(&mut self, env: &Environment, secrets: &[String]) {
         if env.get_variable("CI").is_some() {
             self.secrets.extend_from_slice(secrets);
+        }
+    }
+
+    /// 从配置步骤合并属性
+    pub fn merge_from_config_step(&mut self, step: &Step) {
+        self.inputs = spread(step.inputs.clone(), self.inputs.clone());
+        self.commands = spread(step.commands.clone(), self.commands.clone());
+        self.secrets = spread_strings(step.secrets.clone(), self.secrets.clone());
+        self.caches = spread_strings(step.caches.clone(), self.caches.clone());
+        self.add_variables(&step.variables);
+        for (k, v) in &step.assets {
+            self.assets.insert(k.clone(), v.clone());
         }
     }
 }

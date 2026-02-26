@@ -6,7 +6,7 @@ pub const APT_CACHE_KEY: &str = "apt";
 pub const MISE_CACHE_KEY: &str = "mise";
 
 /// 缓存上下文：管理构建过程中的缓存定义
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CacheContext {
     pub caches: HashMap<String, Cache>,
 }
@@ -75,12 +75,6 @@ impl CacheContext {
         }
 
         vec![APT_CACHE_KEY.to_string(), apt_lists_key.to_string()]
-    }
-}
-
-impl Default for CacheContext {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

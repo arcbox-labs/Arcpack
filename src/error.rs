@@ -15,6 +15,9 @@ pub enum ArcpackError {
     #[error("未识别项目类型，无匹配的 Provider")]
     NoProviderMatched,
 
+    #[error("未知的 Provider: {name}")]
+    UnknownProvider { name: String },
+
     #[error("未找到启动命令{}", help.as_ref().map(|h| format!(": {}", h)).unwrap_or_default())]
     NoStartCommand { help: Option<String> },
 
@@ -96,6 +99,12 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("1"));
         assert!(msg.contains("error: build failed"));
+    }
+
+    #[test]
+    fn test_unknown_provider_display() {
+        let err = ArcpackError::UnknownProvider { name: "xxx".to_string() };
+        assert_eq!(err.to_string(), "未知的 Provider: xxx");
     }
 
     #[test]

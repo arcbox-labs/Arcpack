@@ -1,6 +1,6 @@
 # arcpack
 
-零配置应用构建器（灵感来源于 [Railpack](https://github.com/railwayapp/railpack)）。
+零配置应用构建器（灵感来源于 [Railpack](./railpack/)）。
 自动检测源码的语言/框架 → 生成构建计划 → 转译为 LLB → 通过 BuildKit 输出 OCI 镜像，无需用户编写 Dockerfile。
 属于 ArcBox（类似 Railway / Fly.io 的 PaaS 平台）的核心构建组件。
 
