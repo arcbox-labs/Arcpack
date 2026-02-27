@@ -107,29 +107,25 @@ impl Config {
     ) -> Self {
         let mut config = Self::empty();
 
-        if let Some(ref cmd) = build_command {
-            if !cmd.is_empty() {
-                let step_config = StepConfig {
-                    step: Step {
-                        commands: vec![
-                            Command::new_copy(".", "."),
-                            Command::new_exec_shell(cmd),
-                        ],
-                        ..Step::new("build")
-                    },
-                    ..Default::default()
-                };
-                config.steps.insert("build".to_string(), step_config);
-            }
+        if let Some(cmd) = build_command.as_deref().filter(|c| !c.is_empty()) {
+            let step_config = StepConfig {
+                step: Step {
+                    commands: vec![
+                        Command::new_copy(".", "."),
+                        Command::new_exec_shell(cmd),
+                    ],
+                    ..Step::new("build")
+                },
+                ..Default::default()
+            };
+            config.steps.insert("build".to_string(), step_config);
         }
 
-        if let Some(ref cmd) = start_command {
-            if !cmd.is_empty() {
-                config
-                    .deploy
-                    .get_or_insert_with(DeployConfig::default)
-                    .start_cmd = Some(cmd.clone());
-            }
+        if let Some(cmd) = start_command.as_deref().filter(|c| !c.is_empty()) {
+            config
+                .deploy
+                .get_or_insert_with(DeployConfig::default)
+                .start_cmd = Some(cmd.to_string());
         }
 
         config
