@@ -6,6 +6,7 @@ pub mod resolver;
 pub mod mise;
 pub mod generate;
 pub mod provider;
+pub mod cli;
 pub mod graph;
 pub mod buildkit;
 
