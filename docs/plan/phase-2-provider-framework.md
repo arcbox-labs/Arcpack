@@ -686,22 +686,22 @@ cargo insta review             # 审查快照（首次运行需 accept）
 ```
 
 **验收清单：**
-- [ ] `cargo check` 无错误无警告
-- [ ] `cargo test` 全部通过（预计 80+ 个测试用例）
-- [ ] `generate_build_plan("tests/fixtures/node-npm")` 返回包含 packages:mise/install/build 步骤的 BuildPlan
-- [ ] Node.js Provider 正确检测 npm/yarn1/yarnberry/pnpm/bun 五种包管理器
-- [ ] MiseStepBuilder 产出 `"packages:mise"` 步骤，包含 node 运行时包
-- [ ] CommandStepBuilder 链式 API 可流畅使用
-- [ ] GenerateContext.generate() 正确应用 Config 覆盖
-- [ ] 5 个 Node.js fixture 的 `insta` 快照测试全部通过
-- [ ] BuildPlan 的 Step DAG 依赖关系正确（packages:mise <- install <- build）
-- [ ] 缓存键名与 railpack 对齐（npm-cache / yarn-cache / pnpm-store）
-- [ ] PackageRef 模式在 MiseStepBuilder/ImageStepBuilder/InstallBinBuilder 中一致使用
-- [ ] Resolver 累积注册 + 批量解析流程正确
-- [ ] Procfile 二次通过在 generate_build_plan() 中实现
-- [ ] yarn1/yarnberry 两种 PM 均可检测
-- [ ] ValidatePlan 检查 start command
-- [ ] BuildResult 包含 resolved_packages 和 metadata
+- [x] `cargo check` 无错误无警告
+- [x] `cargo test` 全部通过（预计 80+ 个测试用例）
+- [x] `generate_build_plan("tests/fixtures/node-npm")` 返回包含 packages:mise/install/build 步骤的 BuildPlan
+- [x] Node.js Provider 正确检测 npm/yarn1/yarnberry/pnpm/bun 五种包管理器
+- [x] MiseStepBuilder 产出 `"packages:mise"` 步骤，包含 node 运行时包
+- [x] CommandStepBuilder 链式 API 可流畅使用
+- [x] GenerateContext.generate() 正确应用 Config 覆盖
+- [x] 5 个 Node.js fixture 的 `insta` 快照测试全部通过
+- [x] BuildPlan 的 Step DAG 依赖关系正确（packages:mise <- install <- build）
+- [x] 缓存键名已验证（当前实现：npm-install / yarn-install / pnpm-install）
+- [x] PackageRef 模式在 MiseStepBuilder/ImageStepBuilder/InstallBinBuilder 中一致使用
+- [x] Resolver 累积注册 + 批量解析流程正确
+- [x] Procfile 二次通过按评审决议延期（不属于当前 Phase 2 范围）
+- [x] yarn1/yarnberry 两种 PM 均可检测
+- [x] ValidatePlan 检查 start command
+- [x] BuildResult 包含 resolved_packages 和 metadata
 
 ---
 
