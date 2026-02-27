@@ -684,24 +684,24 @@ cargo build --release
 ```
 
 **验收清单：**
-- [ ] `cargo check` 无错误无警告
-- [ ] `cargo test` 全部通过（预计 160+ 个测试用例）
-- [ ] Graph 拓扑排序（DFS-based）对线性/菱形/空图正确，环检测有效
-- [ ] Graph 传递归约移除冗余边
-- [ ] StepNode 双环境（InputEnv/OutputEnv）正确传播
-- [ ] Layer 合并策略决策正确（should_merge + has_significant_overlap）
-- [ ] BuildGraph `to_dockerfile()` 快照测试通过
-- [ ] Dockerfile 包含 `# syntax=docker/dockerfile:1` 头部
-- [ ] Cache mount 语法正确（`RUN --mount=type=cache,target=...,id=...`）
-- [ ] Secret mount 语法正确（`RUN --mount=type=secret,id=...`）
-- [ ] Image ENV 从 deploy + graph env + system defaults 正确合并
-- [ ] 平台默认值匹配宿主架构（非硬编码 amd64）
-- [ ] `convert_plan_to_dockerfile()` 编排正确
-- [ ] DaemonManager trait 可 mock，两种实现（Subprocess + External）
-- [ ] `BUILDKIT_HOST` 环境变量正确选择 External 模式
-- [ ] BuildKitClient 组装的 buildctl 命令行参数正确（含 secrets）
-- [ ] Secret 验证：缺少 secret 时友好报错
-- [ ] `--show-plan` / `--progress` / `--cache-key` flags 正确
-- [ ] `arcpack build` 命令 help 包含所有参数
+- [x] `cargo check` 无错误无警告
+- [x] `cargo test` 全部通过（预计 160+ 个测试用例）
+- [x] Graph 拓扑排序（DFS-based）对线性/菱形/空图正确，环检测有效
+- [x] Graph 传递归约移除冗余边
+- [x] StepNode 双环境（InputEnv/OutputEnv）正确传播
+- [x] Layer 合并策略决策正确（should_merge + has_significant_overlap）
+- [x] BuildGraph `to_dockerfile()` 快照测试通过
+- [x] Dockerfile 包含 `# syntax=docker/dockerfile:1` 头部
+- [x] Cache mount 语法正确（`RUN --mount=type=cache,target=...,id=...`）
+- [x] Secret mount 语法正确（`RUN --mount=type=secret,id=...`）
+- [x] Image ENV 从 deploy + graph env + system defaults 正确合并
+- [x] 平台默认值匹配宿主架构（非硬编码 amd64）
+- [x] `convert_plan_to_dockerfile()` 编排正确
+- [x] DaemonManager trait 可 mock，两种实现（Subprocess + External）
+- [x] `BUILDKIT_HOST` 环境变量正确选择 External 模式
+- [x] BuildKitClient 组装的 buildctl 命令行参数正确（含 secrets）
+- [x] Secret 验证：缺少 secret 时友好报错
+- [x] `--show-plan` / `--progress` / `--cache-key` flags 正确
+- [x] `arcpack build` 命令 help 包含所有参数
 - [ ] 集成测试（`#[ignore]`）在有 buildkitd + buildctl 环境中通过
 - [ ] 构建产出 OCI 镜像，`docker run` 可正常执行

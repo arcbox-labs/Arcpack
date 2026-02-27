@@ -580,14 +580,14 @@ cargo test --features llb
 ```
 
 **验收清单：**
-- [ ] `cargo check --features llb` 无错误无警告
-- [ ] `cargo check`（无 llb feature）不编译任何 Phase B-1 代码
-- [ ] `pb::Op` / `pb::ExecOp` / `pb::SourceOp` / `pb::FileOp` / `pb::MergeOp` 类型可用
-- [ ] `image()` / `local()` / `scratch()` 生成正确的 SourceOp
-- [ ] `ExecBuilder` 支持 cache mount + secret env + readonly layer
-- [ ] `copy()` / `make_file()` / `make_dir()` 生成正确的 FileOp
-- [ ] `merge()` 生成正确的 MergeOp
-- [ ] `marshal()` 对 DAG 执行拓扑序列化，输出正确的 `pb::Definition`
-- [ ] `marshal()` 对共享输入正确去重
-- [ ] 所有 digest 格式为 `sha256:{64位hex}`
-- [ ] 预计 ~30 个测试用例全部通过
+- [x] `cargo check --features llb` 无错误无警告
+- [x] `cargo check`（无 llb feature）不编译任何 Phase B-1 代码
+- [x] `pb::Op` / `pb::ExecOp` / `pb::SourceOp` / `pb::FileOp` / `pb::MergeOp` 类型可用
+- [x] `image()` / `local()` / `scratch()` 生成正确的 SourceOp
+- [x] `ExecBuilder` 支持 cache mount + secret env + readonly layer
+- [x] `copy()` / `make_file()` / `make_dir()` 生成正确的 FileOp
+- [x] `merge()` 生成正确的 MergeOp
+- [x] `marshal()` 对 DAG 执行拓扑序列化，输出正确的 `pb::Definition`
+- [x] `marshal()` 对共享输入正确去重
+- [x] 所有 digest 格式为 `sha256:{64位hex}`
+- [x] 预计 ~30 个测试用例全部通过

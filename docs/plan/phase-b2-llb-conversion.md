@@ -544,15 +544,15 @@ cargo test --features llb -- --ignored   # 需要 buildkitd + buildctl
 ```
 
 **验收清单：**
-- [ ] `cargo check --features llb` 无错误无警告
-- [ ] Phase A 所有测试仍然通过（`cargo test` 无 llb feature）
-- [ ] StepNode `llb_state` 字段在处理后正确存储 `OperationOutput`
-- [ ] `get_cache_mount_spec()` 返回正确的 `MountSpec::Cache`
-- [ ] `get_full_state_from_layers_llb()` merge/copy 策略与 Phase A 决策一致
-- [ ] 4 种命令转换（Exec/Path/Copy/File）生成正确的 LLB 操作
-- [ ] Exec 转换包含 cache mount + secret mount + secret 失效
-- [ ] Deploy 阶段正确复制构建产出到新基础镜像
-- [ ] `convert_plan_to_llb()` 返回有效的 `(Definition, ImageConfig)`
+- [x] `cargo check --features llb` 无错误无警告
+- [x] Phase A 所有测试仍然通过（`cargo test` 无 llb feature）
+- [x] StepNode `llb_state` 字段在处理后正确存储 `OperationOutput`
+- [x] `get_cache_mount_spec()` 返回正确的 `MountSpec::Cache`
+- [x] `get_full_state_from_layers_llb()` merge/copy 策略与 Phase A 决策一致
+- [x] 4 种命令转换（Exec/Path/Copy/File）生成正确的 LLB 操作
+- [x] Exec 转换包含 cache mount + secret mount + secret 失效
+- [x] Deploy 阶段正确复制构建产出到新基础镜像
+- [x] `convert_plan_to_llb()` 返回有效的 `(Definition, ImageConfig)`
 - [ ] `build_from_llb()` 通过 buildctl stdin 成功构建（`#[ignore]` smoke test）
 - [ ] 完整等价性验证由 TB4.3 覆盖
-- [ ] 预计 ~25 个测试用例全部通过
+- [x] 预计 ~25 个测试用例全部通过
