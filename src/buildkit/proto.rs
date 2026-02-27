@@ -39,6 +39,14 @@ pub mod grpc_proto {
                 pub mod sourcepolicy {
                     include!(concat!(env!("OUT_DIR"), "/moby.buildkit.v1.sourcepolicy.rs"));
                 }
+
+                pub mod apicaps {
+                    include!(concat!(env!("OUT_DIR"), "/moby.buildkit.v1.apicaps.rs"));
+                }
+
+                pub mod frontend {
+                    include!(concat!(env!("OUT_DIR"), "/moby.buildkit.v1.frontend.rs"));
+                }
             }
 
             pub mod secrets {
@@ -63,3 +71,5 @@ pub use grpc_proto::moby::buildkit::v1 as control;
 pub use grpc_proto::moby::buildkit::secrets::v1 as secrets;
 #[cfg(feature = "grpc")]
 pub use grpc_proto::moby::filesync::v1 as filesync;
+#[cfg(feature = "grpc")]
+pub use grpc_proto::moby::buildkit::v1::frontend as gateway;

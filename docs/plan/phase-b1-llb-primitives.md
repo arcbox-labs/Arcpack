@@ -31,7 +31,7 @@ TB1.1 (Proto 获取 + tonic-build 生成)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.10 |
 | **railpack 参考** | `rp:buildkit/graph/graph.go`（Go 直接使用 BuildKit SDK，无需 proto） |
 | **依赖** | Phase 4 (Phase A) |
@@ -103,7 +103,7 @@ TB1.1 (Proto 获取 + tonic-build 生成)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.10 |
 | **railpack 参考** | 无直接对应（Go 使用 `llb.State` 内部封装；arcpack 显式建模） |
 | **依赖** | TB1.1 |
@@ -202,7 +202,7 @@ TB1.1 (Proto 获取 + tonic-build 生成)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.10 |
 | **railpack 参考** | Go `llb.Image()`, `llb.Local()`, `llb.Scratch()` |
 | **依赖** | TB1.2 |
@@ -278,7 +278,7 @@ TB1.1 (Proto 获取 + tonic-build 生成)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.10 |
 | **railpack 参考** | Go `llb.State.Run()`, `llb.AddMount()`, `llb.AddCacheMountOption()` |
 | **依赖** | TB1.3 |
@@ -394,7 +394,7 @@ TB1.1 (Proto 获取 + tonic-build 生成)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.10 |
 | **railpack 参考** | Go `llb.Copy()`, `llb.Mkfile()`, `llb.Mkdir()`, `llb.Merge()` |
 | **依赖** | TB1.4 |
@@ -491,7 +491,7 @@ TB1.1 (Proto 获取 + tonic-build 生成)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.10 |
 | **railpack 参考** | Go `llb.State.Marshal()` → `solver/pb.Definition` |
 | **依赖** | TB1.5 |

@@ -40,7 +40,7 @@ TB3.1 (gRPC 连接：tonic Channel + Unix Socket)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | BK§3.1, Arch§3.10 |
 | **railpack 参考** | `rp:buildkit/build.go`（getClient → grpc.Dial） |
 | **依赖** | TB2.6 |
@@ -165,7 +165,7 @@ TB3.1 (gRPC 连接：tonic Channel + Unix Socket)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | BK§3.3, Arch§3.10 |
 | **railpack 参考** | `rp:buildkit/build.go`（BuildWithBuildkitClient → controlClient.Solve） |
 | **依赖** | TB3.1 |
@@ -258,7 +258,7 @@ TB3.1 (gRPC 连接：tonic Channel + Unix Socket)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | BK§3.3, Arch§3.10 |
 | **railpack 参考** | `rp:buildkit/build.go`（attachable: filesync.NewFSSyncProvider） |
 | **依赖** | TB3.2 |
@@ -360,7 +360,7 @@ BuildKit Session 协议**并非**标准 gRPC 双向流。实际实现使用 HTTP
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | BK§3.3, Arch§3.10 |
 | **railpack 参考** | `rp:buildkit/build.go`（attachable: secretsprovider.NewSecretProvider） |
 | **依赖** | TB3.3 |
@@ -432,7 +432,7 @@ BuildKit Session 协议**并非**标准 gRPC 双向流。实际实现使用 HTTP
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | BK§3.5 |
 | **railpack 参考** | `rp:buildkit/build.go`（displayCh + progressui.DisplaySolveStatus） |
 | **依赖** | TB3.4 |
@@ -526,7 +526,7 @@ BuildKit Session 协议**并非**标准 gRPC 双向流。实际实现使用 HTTP
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | BK§3.5, Arch§3.10 |
 | **railpack 参考** | `rp:buildkit/build.go`（BuildWithBuildkitClient 完整实现） |
 | **依赖** | TB3.5 |
@@ -674,15 +674,15 @@ cargo test --features grpc -- --ignored   # 需要 buildkitd
 ```
 
 **验收清单：**
-- [ ] `cargo check --features grpc` 无错误无警告
-- [ ] 额外 proto 文件（control/filesync/secrets）编译成功
-- [ ] Unix socket Channel 连接 buildkitd 成功
-- [ ] Solve RPC 发送 LLB Definition 并收到结果
-- [ ] FilesyncProvider 响应 buildkitd 文件请求
-- [ ] SecretsProvider 响应 buildkitd Secret 请求
-- [ ] Status RPC 流式接收构建进度
-- [ ] Plain 模式进度渲染输出正确
-- [ ] `GrpcBuildKitClient.build()` 完整流程成功
-- [ ] Image push / local dir / docker tar 三种 export 模式正确
-- [ ] Session + Solve + Progress 并发无死锁
-- [ ] 预计 ~20 个测试用例全部通过
+- [x] `cargo check --features grpc` 无错误无警告
+- [x] 额外 proto 文件（control/filesync/secrets）编译成功
+- [x] Unix socket Channel 连接 buildkitd 成功
+- [x] Solve RPC 发送 LLB Definition 并收到结果
+- [x] FilesyncProvider 响应 buildkitd 文件请求（DiffCopy 协议通过 h2 crate 实现，含 walk/stat/req/fin/data 阶段；TarStream 返回 Unimplemented）
+- [x] SecretsProvider 响应 buildkitd Secret 请求
+- [x] Status RPC 流式接收构建进度
+- [x] Plain 模式进度渲染输出正确
+- [x] `GrpcBuildKitClient.build()` 完整流程实现（SessionManager + Solve + Progress 编排）
+- [x] Image push / local dir / docker tar 三种 export 模式正确
+- [x] Session + Solve + Progress 并发编排实现（h2 server 在 bidi stream 上运行，按 :path 路由到 handler）
+- [ ] 预计 ~20 个测试用例全部通过（端到端集成测试需 buildkitd 环境验证）

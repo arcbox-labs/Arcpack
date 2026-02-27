@@ -94,6 +94,15 @@ impl Mise {
         cmd.env("MISE_FETCH_REMOTE_VERSIONS_TIMEOUT", "60s");
         cmd.env("MISE_HTTP_RETRIES", "5");
 
+        // 防止读取宿主配置（对齐 railpack mise.go 的隔离策略）
+        cmd.env("MISE_PARANOID", "1");
+        cmd.env("MISE_NO_CONFIG", "1");
+
+        // 防止向上查找 .tool-versions（设置为 cache_dir 的父目录）
+        if let Some(parent) = self.cache_dir.parent() {
+            cmd.env("MISE_CEILING_PATHS", parent);
+        }
+
         // 继承 PATH
         if let Ok(path) = std::env::var("PATH") {
             cmd.env("PATH", path);

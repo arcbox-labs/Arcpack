@@ -1,5 +1,6 @@
 pub mod cache_context;
 pub mod metadata;
+pub mod log_collector;
 pub mod deploy_builder;
 pub mod install_bin_builder;
 pub mod command_step_builder;
@@ -25,6 +26,7 @@ use cache_context::CacheContext;
 use command_step_builder::CommandStepBuilder;
 use deploy_builder::DeployBuilder;
 use image_step_builder::ImageStepBuilder;
+use log_collector::LogCollector;
 use metadata::Metadata;
 use mise_step_builder::MiseStepBuilder;
 
@@ -70,6 +72,7 @@ pub struct GenerateContext {
     pub secrets: Vec<String>,
     pub sub_contexts: Vec<String>,
     pub metadata: Metadata,
+    pub logs: LogCollector,
     pub resolver: Resolver,
     pub mise_step_builder: Option<MiseStepBuilder>,
 }
@@ -96,6 +99,7 @@ impl GenerateContext {
             secrets: Vec::new(),
             sub_contexts: Vec::new(),
             metadata: Metadata::new(),
+            logs: LogCollector::new(),
             resolver: Resolver::new(version_resolver),
             mise_step_builder: None,
         };

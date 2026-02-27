@@ -1,6 +1,10 @@
 pub mod package_json;
 pub mod package_manager;
 pub mod detect;
+pub mod frameworks;
+pub mod spa;
+pub mod prune;
+pub mod workspace;
 
 use std::collections::HashMap;
 
@@ -25,13 +29,27 @@ const COREPACK_HOME: &str = "/opt/corepack";
 /// node_modules 缓存目录
 const NODE_MODULES_CACHE: &str = "/app/node_modules/.cache";
 
+/// Puppeteer/Chromium 所需的 APT 包列表
+const PUPPETEER_APT_PACKAGES: &[&str] = &[
+    "xvfb", "gconf-service", "libasound2", "libatk1.0-0", "libc6",
+    "libcairo2", "libcups2", "libdbus-1-3", "libexpat1", "libfontconfig1",
+    "libgbm1", "libgcc1", "libgconf-2-4", "libgdk-pixbuf2.0-0",
+    "libglib2.0-0", "libgtk-3-0", "libnspr4", "libpango-1.0-0",
+    "libpangocairo-1.0-0", "libstdc++6", "libx11-6", "libx11-xcb1",
+    "libxcb1", "libxcomposite1", "libxcursor1", "libxdamage1", "libxext6",
+    "libxfixes3", "libxi6", "libxrandr2", "libxrender1", "libxss1",
+    "libxtst6", "ca-certificates", "fonts-liberation", "libappindicator1",
+    "libnss3", "lsb-release", "xdg-utils", "wget",
+];
+
 /// Node.js Provider
 ///
 /// 对齐 railpack `core/providers/node/node.go`
-/// Phase 2 最小实现：不含框架检测（Next/Nuxt 等）、SPA 部署、Prune 步骤
+/// 集成框架检测、SPA 部署、Prune 步骤、Workspace 支持
 pub struct NodeProvider {
     package_json: Option<PackageJson>,
     package_manager: PackageManagerKind,
+    workspace_packages: Vec<workspace::WorkspacePackage>,
 }
 
 impl NodeProvider {
@@ -39,6 +57,7 @@ impl NodeProvider {
         Self {
             package_json: None,
             package_manager: PackageManagerKind::Npm,
+            workspace_packages: Vec::new(),
         }
     }
 
@@ -53,11 +72,9 @@ impl NodeProvider {
 
     /// 是否使用 corepack（packageManager 字段存在且非 bun）
     fn uses_corepack(&self) -> bool {
-        if let Some(ref pkg) = self.package_json {
+        self.package_json.as_ref().map_or(false, |pkg| {
             pkg.package_manager.is_some() && self.package_manager != PackageManagerKind::Bun
-        } else {
-            false
-        }
+        })
     }
 
     /// Node 运行时是否必需
@@ -65,17 +82,10 @@ impl NodeProvider {
         if self.package_manager != PackageManagerKind::Bun {
             return true;
         }
-        if let Some(ref pkg) = self.package_json {
-            if pkg.package_manager.is_some() {
-                return true;
-            }
-            for script in pkg.scripts.values() {
-                if script.contains("node") {
-                    return true;
-                }
-            }
-        }
-        false
+        self.package_json.as_ref().map_or(false, |pkg| {
+            pkg.package_manager.is_some()
+                || pkg.scripts.values().any(|s| s.contains("node"))
+        })
     }
 
     /// Bun 运行时是否必需
@@ -128,13 +138,24 @@ impl NodeProvider {
 
     /// 检查是否有 lifecycle 脚本（preinstall/postinstall/prepare）
     fn has_lifecycle_scripts(&self) -> bool {
-        if let Some(ref pkg) = self.package_json {
-            return pkg.has_script("preinstall")
+        self.package_json.as_ref().map_or(false, |pkg| {
+            pkg.has_script("preinstall")
                 || pkg.has_script("postinstall")
                 || pkg.has_script("prepare")
-                || pkg.has_local_dependency();
-        }
-        false
+                || pkg.has_local_dependency()
+        })
+    }
+
+    /// 检测 Puppeteer 依赖
+    fn has_puppeteer(pkg: &PackageJson) -> bool {
+        pkg.has_dependency("puppeteer")
+            || pkg.has_dependency("puppeteer-core")
+            || pkg.has_dependency("puppeteer-extra")
+    }
+
+    /// 获取 Puppeteer APT 包列表
+    fn get_puppeteer_apt_packages() -> Vec<String> {
+        PUPPETEER_APT_PACKAGES.iter().map(|s| s.to_string()).collect()
     }
 
     /// 确保 mise_step_builder 已初始化
@@ -172,6 +193,7 @@ impl Provider for NodeProvider {
     fn initialize(&mut self, ctx: &mut GenerateContext) -> Result<()> {
         let package_json = self.get_package_json(&ctx.app)?;
         self.package_manager = detect::detect_package_manager(&ctx.app, &package_json);
+        self.workspace_packages = workspace::resolve_workspace_packages(&ctx.app)?;
         self.package_json = Some(package_json);
         Ok(())
     }
@@ -349,46 +371,143 @@ impl Provider for NodeProvider {
             build.add_cache(&cache_name);
         }
 
-        // === Deploy 配置 ===
-        if let Some(start_cmd) = self.get_start_command(ctx) {
-            ctx.deploy.start_cmd = Some(start_cmd);
+        // === 框架检测 ===
+        let pkg = self.package_json.as_ref().unwrap();
+
+        // 框架检测优先级：根项目 > 第一个按路径排序匹配的 workspace 子包
+        // 若 monorepo 有多个子包各自用不同框架，仅取第一个（first-match-wins）
+        let primary_framework = frameworks::detect_frameworks(&ctx.app, &ctx.env, pkg, "")
+            .first()
+            .cloned()
+            .or_else(|| {
+                self.workspace_packages.iter().find_map(|ws_pkg| {
+                    frameworks::detect_frameworks(
+                        &ctx.app, &ctx.env, &ws_pkg.package_json, &ws_pkg.path,
+                    )
+                    .first()
+                    .cloned()
+                })
+            });
+
+        if let Some(ref fw) = primary_framework {
+            ctx.metadata.set("nodeFramework", &fw.name);
+            ctx.metadata.set("nodeDeployMode", match fw.mode {
+                frameworks::DeployMode::Ssr => "ssr",
+                frameworks::DeployMode::Spa => "spa",
+            });
+
+            // 框架特定缓存目录
+            for cache_dir in &fw.cache_dirs {
+                let cache_name = cache_dir.trim_start_matches("/app/")
+                    .replace('/', "-").replace('.', "");
+                ctx.caches.add_cache(&cache_name, cache_dir);
+                let build = Self::get_command_step(&mut ctx.steps, "build");
+                build.add_cache(&cache_name);
+            }
         }
 
+        // === Workspace 元数据 ===
+        if !self.workspace_packages.is_empty() {
+            ctx.metadata.set_bool("nodeWorkspace", true);
+            let pkg_names: Vec<&str> = self.workspace_packages.iter()
+                .map(|p| p.path.as_str()).collect();
+            ctx.metadata.set("nodeWorkspacePackages", &pkg_names.join(","));
+        }
+
+        // === Prune 步骤（可选） ===
+        let prune_step_name = prune::create_prune_step(ctx, &self.package_manager, "build");
+        let has_prune = prune_step_name.is_some();
+        if has_prune {
+            ctx.metadata.set_bool("nodePruneDeps", true);
+        }
+
+        // node_modules 层的来源步骤
+        let node_modules_source_step = if has_prune { "prune" } else { "build" };
+
+        // === Deploy 配置 ===
+        let is_spa = primary_framework.as_ref()
+            .map(|fw| fw.mode == frameworks::DeployMode::Spa)
+            .unwrap_or(false);
+
+        if is_spa {
+            // SPA 模式：使用 Caddy 静态服务
+            let fw = primary_framework.as_ref().unwrap();
+            if let Some(ref output_dir) = fw.output_dir {
+                spa::deploy_as_spa(ctx, output_dir, "build")?;
+            }
+        } else {
+            // SSR 或普通 Node.js 模式
+            // SSR 框架的 start_cmd 优先于自动检测
+            if let Some(ref fw) = primary_framework {
+                if let Some(ref start_cmd) = fw.start_cmd {
+                    ctx.deploy.start_cmd = Some(start_cmd.clone());
+                }
+            }
+
+            // 如果框架未提供 start_cmd，使用自动检测
+            if ctx.deploy.start_cmd.is_none() {
+                if let Some(start_cmd) = self.get_start_command(ctx) {
+                    ctx.deploy.start_cmd = Some(start_cmd);
+                }
+            }
+
+            // Deploy inputs
+            let mise_layer = ctx
+                .mise_step_builder
+                .as_ref()
+                .map(|m| m.get_layer())
+                .unwrap_or_default();
+
+            let install_folders = self.package_manager.get_install_folder(&ctx.app);
+            let node_modules_layer = Layer::new_step_layer(
+                node_modules_source_step,
+                Some(Filter::include_only(install_folders)),
+            );
+
+            let mut build_include_dirs = vec!["/root/.cache".to_string(), ".".to_string()];
+            if uses_corepack {
+                build_include_dirs.push(COREPACK_HOME.to_string());
+            }
+
+            let build_layer = Layer::new_step_layer(
+                "build",
+                Some(Filter {
+                    include: build_include_dirs,
+                    exclude: vec!["node_modules".to_string(), ".yarn".to_string()],
+                }),
+            );
+
+            ctx.deploy
+                .add_inputs(&[mise_layer, node_modules_layer, build_layer]);
+        }
+
+        // Deploy 环境变量（两种模式都需要）
         let deploy_env_vars = self.get_node_env_vars();
         for (k, v) in &deploy_env_vars {
             ctx.deploy.variables.insert(k.clone(), v.clone());
         }
 
-        // Deploy inputs
-        let mise_layer = ctx
-            .mise_step_builder
-            .as_ref()
-            .map(|m| m.get_layer())
-            .unwrap_or_default();
-
-        let install_folders = self.package_manager.get_install_folder(&ctx.app);
-        let node_modules_layer = Layer::new_step_layer(
-            "build",
-            Some(Filter::include_only(install_folders)),
-        );
-
-        let mut build_include_dirs = vec!["/root/.cache".to_string(), ".".to_string()];
-        if uses_corepack {
-            build_include_dirs.push(COREPACK_HOME.to_string());
+        // Puppeteer 检测 → 添加 Chromium APT 依赖
+        if let Some(ref pkg) = self.package_json {
+            if Self::has_puppeteer(pkg) {
+                ctx.deploy.add_apt_packages(&Self::get_puppeteer_apt_packages());
+                ctx.logs.info("detected Puppeteer dependency, adding Chromium APT packages");
+            }
         }
 
-        let build_layer = Layer::new_step_layer(
-            "build",
-            Some(Filter {
-                include: build_include_dirs,
-                exclude: vec!["node_modules".to_string(), ".yarn".to_string()],
-            }),
-        );
-
-        ctx.deploy
-            .add_inputs(&[mise_layer, node_modules_layer, build_layer]);
+        // COREPACK_HOME 环境变量（deploy）
+        if uses_corepack {
+            ctx.deploy
+                .variables
+                .insert("COREPACK_HOME".to_string(), COREPACK_HOME.to_string());
+        }
 
         Ok(())
+    }
+
+    fn cleanse_plan(&self, plan: &mut crate::plan::BuildPlan) {
+        let has_prune = plan.steps.iter().any(|s| s.name.as_deref() == Some("prune"));
+        prune::cleanse_plan_for_prune(plan, has_prune);
     }
 
     fn start_command_help(&self) -> Option<String> {
@@ -627,5 +746,26 @@ mod tests {
         let cmd = provider.get_start_command(&ctx);
         assert!(cmd.is_some());
         assert!(cmd.unwrap().contains("index.js"));
+    }
+
+    #[test]
+    fn test_has_puppeteer() {
+        let pkg: PackageJson =
+            serde_json::from_str(r#"{"dependencies":{"puppeteer":"^21.0.0"}}"#).unwrap();
+        assert!(NodeProvider::has_puppeteer(&pkg));
+    }
+
+    #[test]
+    fn test_has_puppeteer_core() {
+        let pkg: PackageJson =
+            serde_json::from_str(r#"{"devDependencies":{"puppeteer-core":"^21.0.0"}}"#).unwrap();
+        assert!(NodeProvider::has_puppeteer(&pkg));
+    }
+
+    #[test]
+    fn test_no_puppeteer() {
+        let pkg: PackageJson =
+            serde_json::from_str(r#"{"dependencies":{"express":"^4.0.0"}}"#).unwrap();
+        assert!(!NodeProvider::has_puppeteer(&pkg));
     }
 }

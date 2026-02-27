@@ -151,8 +151,9 @@ pub fn generate_build_plan(
     // 验证
     validate_plan(&plan, &*provider_to_use, options)?;
 
-    // 收集元数据
+    // 收集元数据和日志
     let metadata = ctx.metadata.to_map();
+    let logs = ctx.logs.into_logs();
 
     Ok(BuildResult {
         arcpack_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -160,7 +161,7 @@ pub fn generate_build_plan(
         resolved_packages,
         metadata,
         detected_providers: vec![provider_to_use.name().to_string()],
-        logs: Vec::new(),
+        logs,
         success: true,
     })
 }

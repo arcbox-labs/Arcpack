@@ -31,7 +31,7 @@ T1.1 (scaffolding)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§2.1, Arch§5.1, Arch§5.2 |
 | **依赖** | 无 |
 
@@ -52,7 +52,7 @@ T1.1 (scaffolding)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.11, Arch§6.3 |
 | **railpack 参考** | 无对应文件（railpack 错误分散于各文件，arcpack 集中定义） |
 | **依赖** | T1.1 |
@@ -78,7 +78,7 @@ T1.1 (scaffolding)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.4, Arch§3.5, Arch§3.6, Arch§8.2 |
 | **railpack 参考** | `rp:core/plan/command.go`, `rp:core/plan/filters.go`, `rp:core/plan/layer.go`, `rp:core/plan/cache.go` |
 | **依赖** | T1.2 |
@@ -105,7 +105,7 @@ T1.1 (scaffolding)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.4, Arch§3.6 (Spread) |
 | **railpack 参考** | `rp:core/plan/step.go`, `rp:core/plan/spread.go`, `rp:core/plan/packages.go` |
 | **依赖** | T1.3 |
@@ -131,7 +131,7 @@ T1.1 (scaffolding)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.4 |
 | **railpack 参考** | `rp:core/plan/plan.go`, `rp:core/plan/dockerignore.go` |
 | **依赖** | T1.4 |
@@ -156,7 +156,7 @@ T1.1 (scaffolding)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.7, Arch§3.8 |
 | **railpack 参考** | `rp:core/app/app.go`, `rp:core/app/environment.go` |
 | **依赖** | T1.2 |
@@ -186,7 +186,7 @@ T1.1 (scaffolding)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.9 |
 | **railpack 参考** | `rp:core/config/config.go` |
 | **依赖** | T1.2, T1.6 |

@@ -10,6 +10,9 @@ pub mod schema;
 pub mod prepare;
 pub mod pretty_print;
 
+#[cfg(feature = "grpc")]
+pub mod frontend;
+
 use clap::{Parser, Subcommand, ArgAction};
 
 use self::plan::PlanArgs;
@@ -45,6 +48,10 @@ pub enum Commands {
 
     /// 执行构建（生成 OCI 镜像）
     Build(build::BuildArgs),
+
+    /// BuildKit 前端模式（由 buildkitd 调用）
+    #[cfg(feature = "grpc")]
+    Frontend(frontend::FrontendArgs),
 }
 
 #[cfg(test)]
@@ -74,5 +81,12 @@ mod tests {
     fn test_cli_parse_verbosity_flags() {
         let cli = Cli::parse_from(["arcpack", "-vv", "schema"]);
         assert_eq!(cli.verbosity, 2);
+    }
+
+    #[cfg(feature = "grpc")]
+    #[test]
+    fn test_cli_parse_frontend_subcommand() {
+        let cli = Cli::parse_from(["arcpack", "frontend"]);
+        assert!(matches!(cli.command, Commands::Frontend(_)));
     }
 }

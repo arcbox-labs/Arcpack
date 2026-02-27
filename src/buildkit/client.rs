@@ -41,17 +41,24 @@ pub struct BuildOutput {
     pub duration: Duration,
 }
 
-/// 追加输出配置参数（image/local）到 args
+/// 追加输出配置参数（image/docker/local）到 args
+///
+/// `docker_tar_dest` 非 None 时，非 push 模式使用 `type=docker` 输出可加载 tarball
 fn push_output_args(
     args: &mut Vec<String>,
     image_name: &Option<String>,
     push: bool,
     output_dir: &Option<PathBuf>,
+    docker_tar_dest: Option<&std::path::Path>,
 ) {
     if let Some(ref name) = image_name {
         if push {
             args.push("--output".to_string());
             args.push(format!("type=image,name={},push=true", name));
+        } else if let Some(tar_path) = docker_tar_dest {
+            // 输出为 Docker 可加载的 tarball，构建完成后通过 docker load 加载
+            args.push("--output".to_string());
+            args.push(format!("type=docker,name={},dest={}", name, tar_path.display()));
         } else {
             args.push("--output".to_string());
             args.push(format!("type=image,name={}", name));
@@ -71,6 +78,33 @@ fn push_secret_args(args: &mut Vec<String>, secrets: &HashMap<String, String>) {
         args.push("--secret".to_string());
         args.push(format!("id={},env={}", key, key));
     }
+}
+
+/// 执行 docker load 加载镜像 tarball
+async fn docker_load(tar_path: &std::path::Path) -> crate::Result<()> {
+    eprintln!("正在加载 Docker 镜像...");
+    let output = tokio::process::Command::new("docker")
+        .args(["load", "-i", &tar_path.to_string_lossy()])
+        .output()
+        .await
+        .map_err(|e| ArcpackError::BuildFailed {
+            exit_code: -1,
+            stderr: format!("无法执行 docker load: {}", e),
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(ArcpackError::BuildFailed {
+            exit_code: output.status.code().unwrap_or(-1),
+            stderr: format!("docker load 失败: {}", stderr),
+        });
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !stdout.is_empty() {
+        eprintln!("{}", stdout.trim());
+    }
+    Ok(())
 }
 
 /// BuildKit 客户端（buildctl CLI 封装）
@@ -106,8 +140,15 @@ impl BuildKitClient {
         let dockerfile_path = temp_dir.join("Dockerfile");
         std::fs::write(&dockerfile_path, &request.dockerfile_content)?;
 
+        // 非 push 模式且指定了镜像名时，输出为 docker tarball 以便 docker load
+        let docker_tar_path = if request.image_name.is_some() && !request.push {
+            Some(temp_dir.join("image.tar"))
+        } else {
+            None
+        };
+
         // 组装命令行参数
-        let args = self.build_args(request, &temp_dir);
+        let args = self.build_args(request, &temp_dir, docker_tar_path.as_deref());
 
         // 执行 buildctl
         let mut cmd = tokio::process::Command::new(&self.buildctl_path);
@@ -126,23 +167,31 @@ impl BuildKitClient {
                 stderr: format!("无法执行 buildctl: {}", e),
             })?;
 
-        // 清理临时文件
-        let _ = std::fs::remove_dir_all(&temp_dir);
-
         if !output.status.success() {
             let exit_code = output.status.code().unwrap_or(-1);
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let _ = std::fs::remove_dir_all(&temp_dir);
             return Err(ArcpackError::BuildFailed { exit_code, stderr });
         }
 
+        // 自动加载 Docker 镜像（非 push 模式）
+        if let Some(ref tar_path) = docker_tar_path {
+            if tar_path.exists() {
+                docker_load(tar_path).await?;
+            }
+        }
+
+        // 清理临时文件
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
         Ok(BuildOutput {
-            image_digest: None, // buildctl 不直接返回 digest
+            image_digest: None,
             duration: start.elapsed(),
         })
     }
 
     /// 组装 buildctl 命令行参数（纯函数，可独立测试）
-    fn build_args(&self, request: &BuildRequest, dockerfile_dir: &std::path::Path) -> Vec<String> {
+    fn build_args(&self, request: &BuildRequest, dockerfile_dir: &std::path::Path, docker_tar_dest: Option<&std::path::Path>) -> Vec<String> {
         let mut args = vec![
             "--addr".to_string(),
             self.addr.clone(),
@@ -163,7 +212,7 @@ impl BuildKitClient {
             args.push(format!("platform={}", request.platform));
         }
 
-        push_output_args(&mut args, &request.image_name, request.push, &request.output_dir);
+        push_output_args(&mut args, &request.image_name, request.push, &request.output_dir, docker_tar_dest);
         push_secret_args(&mut args, &request.secrets);
 
         // 缓存导入
@@ -255,7 +304,7 @@ impl BuildKitClient {
             request.progress_mode.clone(),
         ];
 
-        push_output_args(&mut args, &request.image_name, request.push, &request.output_dir);
+        push_output_args(&mut args, &request.image_name, request.push, &request.output_dir, None);
         push_secret_args(&mut args, &request.secrets);
 
         // no-cache
@@ -315,7 +364,7 @@ mod tests {
         let client = BuildKitClient::new("unix:///tmp/buildkit.sock");
         let req = make_request();
         let temp = PathBuf::from("/tmp/dockerfile");
-        let args = client.build_args(&req, &temp);
+        let args = client.build_args(&req, &temp, None);
         assert!(args.contains(&"--addr".to_string()));
         assert!(args.contains(&"unix:///tmp/buildkit.sock".to_string()));
         assert!(args.contains(&"build".to_string()));
@@ -329,7 +378,7 @@ mod tests {
         let client = BuildKitClient::new("unix:///tmp/test.sock");
         let mut req = make_request();
         req.image_name = Some("myapp:latest".to_string());
-        let args = client.build_args(&req, &PathBuf::from("/tmp"));
+        let args = client.build_args(&req, &PathBuf::from("/tmp"), None);
         assert!(args.contains(&"--output".to_string()));
         assert!(args.contains(&"type=image,name=myapp:latest".to_string()));
     }
@@ -340,7 +389,7 @@ mod tests {
         let mut req = make_request();
         req.image_name = Some("myapp:latest".to_string());
         req.push = true;
-        let args = client.build_args(&req, &PathBuf::from("/tmp"));
+        let args = client.build_args(&req, &PathBuf::from("/tmp"), None);
         assert!(args.contains(&"type=image,name=myapp:latest,push=true".to_string()));
     }
 
@@ -349,7 +398,7 @@ mod tests {
         let client = BuildKitClient::new("unix:///tmp/test.sock");
         let mut req = make_request();
         req.secrets.insert("MY_SECRET".to_string(), "value".to_string());
-        let args = client.build_args(&req, &PathBuf::from("/tmp"));
+        let args = client.build_args(&req, &PathBuf::from("/tmp"), None);
         assert!(args.contains(&"--secret".to_string()));
         assert!(args.contains(&"id=MY_SECRET,env=MY_SECRET".to_string()));
     }
@@ -360,7 +409,7 @@ mod tests {
         let mut req = make_request();
         req.cache_import = Some("type=gha".to_string());
         req.cache_export = Some("type=gha,mode=max".to_string());
-        let args = client.build_args(&req, &PathBuf::from("/tmp"));
+        let args = client.build_args(&req, &PathBuf::from("/tmp"), None);
         assert!(args.contains(&"--import-cache".to_string()));
         assert!(args.contains(&"type=gha".to_string()));
         assert!(args.contains(&"--export-cache".to_string()));
@@ -372,7 +421,7 @@ mod tests {
         let client = BuildKitClient::new("unix:///tmp/test.sock");
         let mut req = make_request();
         req.platform = "linux/amd64".to_string();
-        let args = client.build_args(&req, &PathBuf::from("/tmp"));
+        let args = client.build_args(&req, &PathBuf::from("/tmp"), None);
         assert!(args.contains(&"--opt".to_string()));
         assert!(args.contains(&"platform=linux/amd64".to_string()));
     }
@@ -382,8 +431,31 @@ mod tests {
         let client = BuildKitClient::new("unix:///tmp/test.sock");
         let mut req = make_request();
         req.output_dir = Some(PathBuf::from("/output"));
-        let args = client.build_args(&req, &PathBuf::from("/tmp"));
+        let args = client.build_args(&req, &PathBuf::from("/tmp"), None);
         assert!(args.contains(&"type=local,dest=/output".to_string()));
+    }
+
+    #[test]
+    fn test_build_args_with_docker_tar_dest_uses_type_docker() {
+        let client = BuildKitClient::new("unix:///tmp/test.sock");
+        let mut req = make_request();
+        req.image_name = Some("myapp:latest".to_string());
+        let tar_path = PathBuf::from("/tmp/image.tar");
+        let args = client.build_args(&req, &PathBuf::from("/tmp"), Some(tar_path.as_path()));
+        assert!(args.contains(&"--output".to_string()));
+        assert!(args.contains(&"type=docker,name=myapp:latest,dest=/tmp/image.tar".to_string()));
+    }
+
+    #[test]
+    fn test_build_args_push_ignores_docker_tar_dest() {
+        let client = BuildKitClient::new("unix:///tmp/test.sock");
+        let mut req = make_request();
+        req.image_name = Some("myapp:latest".to_string());
+        req.push = true;
+        let tar_path = PathBuf::from("/tmp/image.tar");
+        let args = client.build_args(&req, &PathBuf::from("/tmp"), Some(tar_path.as_path()));
+        // push 模式忽略 docker_tar_dest，使用 type=image
+        assert!(args.contains(&"type=image,name=myapp:latest,push=true".to_string()));
     }
 
     #[test]
@@ -395,7 +467,7 @@ mod tests {
         let mut req = make_request();
         req.secrets.insert("API_KEY".to_string(), "secret_value".to_string());
         req.secrets.insert("DB_PASS".to_string(), "db_secret".to_string());
-        let args = client.build_args(&req, &PathBuf::from("/tmp"));
+        let args = client.build_args(&req, &PathBuf::from("/tmp"), None);
 
         // 验证每个 secret 都有对应的 --secret 参数
         let secret_count = args.iter().filter(|a| *a == "--secret").count();

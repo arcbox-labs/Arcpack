@@ -73,14 +73,6 @@ impl GrpcBuildKitClient {
         let start = Instant::now();
 
         // 1. 创建 Session Manager，注册 providers
-        // session service 路由尚未实现，提前警告用户
-        if !request.secrets.is_empty() || !request.local_dirs.is_empty() {
-            warn!(
-                "session service routing not yet implemented; \
-                 secrets and local_dirs are registered but buildkitd callbacks will not be served"
-            );
-        }
-
         let session = SessionManager::new()
             .with_filesync(FilesyncProvider::new(request.local_dirs))
             .with_secrets(SecretsProvider::new(request.secrets));

@@ -17,6 +17,11 @@ impl SecretsProvider {
     pub fn new(secrets: HashMap<String, String>) -> Self {
         Self { secrets }
     }
+
+    /// 直接查找 secret（供 session handler 调用，不走 tonic trait）
+    pub fn get_secret(&self, id: &str) -> Option<&String> {
+        self.secrets.get(id)
+    }
 }
 
 #[tonic::async_trait]

@@ -21,7 +21,7 @@ TB4.1 (CLI build 命令双路径集成)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§6.1 |
 | **railpack 参考** | `rp:cli/build.go` |
 | **依赖** | TB3.6 |
@@ -113,7 +113,7 @@ TB4.1 (CLI build 命令双路径集成)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | — |
 | **railpack 参考** | — |
 | **依赖** | TB4.1 |
@@ -200,7 +200,7 @@ TB4.1 (CLI build 命令双路径集成)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | — |
 | **railpack 参考** | — |
 | **依赖** | TB4.1 |
@@ -421,13 +421,13 @@ cargo test --features grpc -- --ignored   # 需要 buildkitd
 ```
 
 **验收清单：**
-- [ ] `--backend` 参数正确切换三种构建路径
-- [ ] `ARCPACK_BACKEND` 环境变量覆盖 `--backend`
-- [ ] 无 `llb` feature 时 LLB backend 返回友好错误；无 `grpc` feature 时 gRPC backend 返回友好错误
-- [ ] `--dump-llb` 输出有效的 protobuf / JSON
-- [ ] `--dump-llb` 不触发实际构建
-- [ ] 等价性测试框架可运行
-- [ ] `arcpack frontend` 子命令存在且可解析
+- [x] `--backend` 参数正确切换三种构建路径
+- [x] `ARCPACK_BACKEND` 环境变量覆盖 `--backend`
+- [x] 无 `llb` feature 时 LLB backend 返回友好错误；无 `grpc` feature 时 gRPC backend 返回友好错误
+- [x] `--dump-llb` 输出有效的 protobuf / JSON
+- [x] `--dump-llb` 不触发实际构建
+- [x] 等价性测试框架可运行（5 个 Node.js fixture 等价性测试 + 辅助函数 + ImageCleanupGuard）
+- [x] `arcpack frontend` 子命令存在且可解析
 - [ ] `GatewayClient` 正确连接 `BUILDKIT_FRONTEND_ADDR`
 - [ ] （ignore）三种 backend 构建同一 fixture 产出等价镜像
 - [ ] （ignore）所有 Provider fixture 等价性验证通过
