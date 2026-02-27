@@ -150,7 +150,7 @@ fn validate_backend_feature(backend: Backend) -> crate::Result<Backend> {
 /// 执行构建命令
 pub fn run_build(args: &BuildArgs) -> crate::Result<bool> {
     // 1. 生成 BuildResult
-    let result = generate_build_result_for_command(&args.common)?;
+    let mut result = generate_build_result_for_command(&args.common)?;
 
     // 2. Pretty print 到 stderr
     let print_options = PrintOptions {
@@ -165,18 +165,20 @@ pub fn run_build(args: &BuildArgs) -> crate::Result<bool> {
         return Ok(false);
     }
 
-    let plan = result.plan.as_ref().ok_or_else(|| {
-        anyhow::anyhow!("构建计划生成成功但无 plan 数据")
-    })?;
+    if result.plan.is_none() {
+        return Err(anyhow::anyhow!("构建计划生成成功但无 plan 数据").into());
+    }
 
     // 4. --show-plan -> 输出 plan JSON 到 stdout
     if args.show_plan {
-        let json = serde_json::to_string_pretty(plan)?;
+        let json = serde_json::to_string_pretty(result.plan.as_ref().unwrap())?;
         println!("{}", json);
     }
 
-    // 5. 验证 secrets
-    let env_vars = parse_env_vars(&args.common.env)?;
+    // 5. 注入 GITHUB_TOKEN 到 mise install 步骤 + 验证 secrets
+    let mut env_vars = parse_env_vars(&args.common.env)?;
+    inject_github_token_for_mise(result.plan.as_mut().unwrap(), &mut env_vars);
+    let plan = result.plan.as_ref().unwrap();
     validate_secrets(plan, &env_vars)?;
 
     // 6. 计算 secrets hash
@@ -504,6 +506,38 @@ pub(crate) fn write_dump_output(path: &str, data: &[u8]) -> crate::Result<()> {
 }
 
 // === 辅助函数 ===
+
+/// 注入 GITHUB_TOKEN 到 mise install 步骤的 secrets 列表
+///
+/// 如果环境变量中包含 GITHUB_TOKEN，则将其添加到所有包含 mise install 的步骤中，
+/// 避免 mise 下载时触发 GitHub API rate limit。
+fn inject_github_token_for_mise(
+    plan: &mut crate::plan::BuildPlan,
+    env_vars: &mut HashMap<String, String>,
+) {
+    // 检查 GITHUB_TOKEN 是否存在（环境变量或 OS 环境）
+    if !env_vars.contains_key("GITHUB_TOKEN") {
+        if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+            env_vars.insert("GITHUB_TOKEN".to_string(), token);
+        } else {
+            return;
+        }
+    }
+
+    // 注入到包含 mise install 的步骤
+    for step in &mut plan.steps {
+        let has_mise = step.commands.iter().any(|cmd| {
+            if let crate::plan::Command::Exec(exec) = cmd {
+                exec.cmd.contains("mise install")
+            } else {
+                false
+            }
+        });
+        if has_mise && !step.secrets.contains(&"GITHUB_TOKEN".to_string()) {
+            step.secrets.push("GITHUB_TOKEN".to_string());
+        }
+    }
+}
 
 /// 验证 plan 中声明的 secrets 在环境变量中都存在
 fn validate_secrets(
