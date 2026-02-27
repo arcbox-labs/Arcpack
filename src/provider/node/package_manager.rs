@@ -353,6 +353,11 @@ mod tests {
         assert_eq!(PackageManagerKind::YarnBerry.cache_type(), CacheType::Shared);
     }
 
+    /// 辅助函数：将 commands 序列化为可搜索字符串
+    fn commands_debug_str(install: &CommandStepBuilder) -> String {
+        install.commands.iter().map(|c| format!("{:?}", c)).collect::<Vec<_>>().join(" ")
+    }
+
     #[test]
     fn test_bun_install_with_lockfile_uses_frozen() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -363,9 +368,7 @@ mod tests {
         let mut install = CommandStepBuilder::new("install");
         PackageManagerKind::Bun.install_deps(&app, &mut caches, &mut install, false);
 
-        let cmds: Vec<String> = install.commands.iter().map(|c| format!("{:?}", c)).collect();
-        let cmd_str = cmds.join(" ");
-        assert!(cmd_str.contains("--frozen-lockfile"), "应使用 --frozen-lockfile");
+        assert!(commands_debug_str(&install).contains("--frozen-lockfile"), "应使用 --frozen-lockfile");
     }
 
     #[test]
@@ -377,9 +380,7 @@ mod tests {
         let mut install = CommandStepBuilder::new("install");
         PackageManagerKind::Bun.install_deps(&app, &mut caches, &mut install, false);
 
-        let cmds: Vec<String> = install.commands.iter().map(|c| format!("{:?}", c)).collect();
-        let cmd_str = cmds.join(" ");
-        assert!(!cmd_str.contains("--frozen-lockfile"), "无锁文件时不应使用 --frozen-lockfile");
+        assert!(!commands_debug_str(&install).contains("--frozen-lockfile"), "无锁文件时不应使用 --frozen-lockfile");
     }
 
     #[test]
@@ -392,9 +393,7 @@ mod tests {
         let mut install = CommandStepBuilder::new("install");
         PackageManagerKind::Yarn1.install_deps(&app, &mut caches, &mut install, false);
 
-        let cmds: Vec<String> = install.commands.iter().map(|c| format!("{:?}", c)).collect();
-        let cmd_str = cmds.join(" ");
-        assert!(cmd_str.contains("--frozen-lockfile"), "应使用 --frozen-lockfile");
+        assert!(commands_debug_str(&install).contains("--frozen-lockfile"), "应使用 --frozen-lockfile");
     }
 
     #[test]
@@ -406,8 +405,6 @@ mod tests {
         let mut install = CommandStepBuilder::new("install");
         PackageManagerKind::Yarn1.install_deps(&app, &mut caches, &mut install, false);
 
-        let cmds: Vec<String> = install.commands.iter().map(|c| format!("{:?}", c)).collect();
-        let cmd_str = cmds.join(" ");
-        assert!(!cmd_str.contains("--frozen-lockfile"), "无锁文件时不应使用 --frozen-lockfile");
+        assert!(!commands_debug_str(&install).contains("--frozen-lockfile"), "无锁文件时不应使用 --frozen-lockfile");
     }
 }

@@ -6,6 +6,8 @@ pub mod resolver;
 pub mod mise;
 pub mod generate;
 pub mod provider;
+pub mod graph;
+pub mod buildkit;
 
 pub use error::ArcpackError;
 
@@ -14,6 +16,8 @@ pub type Result<T> = std::result::Result<T, ArcpackError>;
 
 use std::collections::HashMap;
 
+use serde::{Serialize, Deserialize};
+
 use app::App;
 use app::environment::Environment;
 use config::Config;
@@ -21,13 +25,30 @@ use generate::GenerateContext;
 use plan::BuildPlan;
 use resolver::ResolvedPackage;
 
+/// 日志级别
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Info,
+    Warn,
+    Error,
+}
+
+/// 构建日志消息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogMsg {
+    pub level: LogLevel,
+    pub message: String,
+}
+
 /// 构建计划生成选项
 ///
 /// 对齐 railpack `core/core.go GenerateBuildPlanOptions`
 pub struct GenerateBuildPlanOptions {
-    /// 覆盖构建命令
+    /// 默认构建命令（优先级低于环境变量和配置文件）
     pub build_command: Option<String>,
-    /// 覆盖启动命令
+    /// 默认启动命令（优先级低于环境变量和配置文件）
     pub start_command: Option<String>,
     /// 上次构建的包版本（用于版本固定）
     pub previous_versions: HashMap<String, String>,
@@ -52,15 +73,21 @@ impl Default for GenerateBuildPlanOptions {
 /// 构建结果
 ///
 /// 对齐 railpack `core/core.go BuildResult`
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BuildResult {
+    /// arcpack 版本
+    pub arcpack_version: String,
     /// 构建计划
-    pub plan: BuildPlan,
+    pub plan: Option<BuildPlan>,
     /// 解析后的包版本
     pub resolved_packages: HashMap<String, ResolvedPackage>,
     /// 元数据
     pub metadata: HashMap<String, String>,
     /// 检测到的 Provider 列表
     pub detected_providers: Vec<String>,
+    /// 构建日志
+    pub logs: Vec<LogMsg>,
     /// 是否成功
     pub success: bool,
 }
@@ -94,8 +121,13 @@ pub fn generate_build_plan(
     let mut provider_to_use = detect_provider(&app, &env, &config)?;
 
     // 创建版本解析器
-    let cache_dir = std::env::temp_dir().join("arcpack/mise");
-    let version_resolver = Box::new(mise::Mise::new(cache_dir.to_str().unwrap())?);
+    let cache_dir = std::env::temp_dir().join(format!("arcpack/mise-{}", std::process::id()));
+    let cache_dir_str = cache_dir.to_str().ok_or_else(|| {
+        ArcpackError::ConfigError {
+            message: format!("缓存路径包含非 UTF-8 字符: {:?}", cache_dir),
+        }
+    })?;
+    let version_resolver = Box::new(mise::Mise::new(cache_dir_str)?);
 
     // 创建 GenerateContext
     let mut ctx = GenerateContext::new(app, env, config, version_resolver)?;
@@ -122,10 +154,12 @@ pub fn generate_build_plan(
     let metadata = ctx.metadata.to_map();
 
     Ok(BuildResult {
-        plan,
+        arcpack_version: env!("CARGO_PKG_VERSION").to_string(),
+        plan: Some(plan),
         resolved_packages,
         metadata,
         detected_providers: vec![provider_to_use.name().to_string()],
+        logs: Vec::new(),
         success: true,
     })
 }

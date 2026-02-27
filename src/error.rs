@@ -12,6 +12,9 @@ pub enum ArcpackError {
     #[error("配置解析失败: {path}: {message}")]
     ConfigParse { path: String, message: String },
 
+    #[error("配置错误: {message}")]
+    ConfigError { message: String },
+
     #[error("未识别项目类型，无匹配的 Provider")]
     NoProviderMatched,
 
@@ -36,6 +39,15 @@ pub enum ArcpackError {
 
     #[error("推送失败: {message}")]
     PushFailed { message: String },
+
+    #[error("检测到循环依赖: {node}")]
+    CycleDetected { node: String },
+
+    #[error("缺少环境变量: {name}，请通过 --env {name}=... 设置")]
+    MissingSecret { name: String },
+
+    #[error("缓存未找到: {key}")]
+    CacheNotFound { key: String },
 
     // 内部错误
     #[error("IO 错误: {0}")]
