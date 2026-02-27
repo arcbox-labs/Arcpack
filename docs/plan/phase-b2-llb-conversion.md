@@ -35,7 +35,7 @@ TB2.1 (StepNode 扩展 + LLB BuildGraph 骨架)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.10 |
 | **railpack 参考** | `rp:buildkit/build_llb/step_node.go`（State 字段）, `rp:buildkit/build_llb/build_graph.go`（ToLLB 方法） |
 | **依赖** | TB1.6 |
@@ -113,7 +113,7 @@ TB2.1 (StepNode 扩展 + LLB BuildGraph 骨架)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.10 |
 | **railpack 参考** | `rp:buildkit/build_llb/cache_store.go`（GetCacheMount） |
 | **依赖** | TB2.1 |
@@ -166,7 +166,7 @@ TB2.1 (StepNode 扩展 + LLB BuildGraph 骨架)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.10 |
 | **railpack 参考** | `rp:buildkit/build_llb/layers.go`（getFullStateFromLayers） |
 | **依赖** | TB2.1 |
@@ -233,7 +233,7 @@ TB2.1 (StepNode 扩展 + LLB BuildGraph 骨架)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.10 |
 | **railpack 参考** | `rp:buildkit/build_llb/build_graph.go`（convertNodeToLLB, convertExecCommand, convertPathCommand, convertCopyCommand, convertFileCommand） |
 | **依赖** | TB2.1, TB2.2, TB2.3 |
@@ -349,7 +349,7 @@ TB2.1 (StepNode 扩展 + LLB BuildGraph 骨架)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.10 |
 | **railpack 参考** | `rp:buildkit/convert.go`（ConvertPlanToLLB）, `rp:buildkit/build_llb/build_graph.go`（buildDeployState） |
 | **依赖** | TB2.4 |
@@ -436,7 +436,7 @@ TB2.1 (StepNode 扩展 + LLB BuildGraph 骨架)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | — |
 | **railpack 参考** | — |
 | **依赖** | TB2.5 |

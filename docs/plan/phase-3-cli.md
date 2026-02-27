@@ -25,7 +25,7 @@ T3.6 (main.rs 集成 + CLI 测试)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§1.4, Arch§6.4 |
 | **railpack 参考** | `rp:cli/common.go`, `rp:cmd/cli/main.go`, `rp:core/core.go` |
 | **依赖** | Phase 2 |
@@ -87,7 +87,7 @@ T3.6 (main.rs 集成 + CLI 测试)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§1.4 |
 | **railpack 参考** | `rp:cli/plan.go` |
 | **依赖** | T3.1 |
@@ -122,7 +122,7 @@ T3.6 (main.rs 集成 + CLI 测试)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§1.4 |
 | **railpack 参考** | `rp:cli/info.go`, `rp:core/prettyPrint.go` |
 | **依赖** | T3.1 |
@@ -176,7 +176,7 @@ T3.6 (main.rs 集成 + CLI 测试)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§1.4 |
 | **railpack 参考** | `rp:cli/schema.go` |
 | **依赖** | T3.1 |
@@ -194,7 +194,7 @@ T3.6 (main.rs 集成 + CLI 测试)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§1.4 |
 | **railpack 参考** | `rp:cli/prepare.go` |
 | **依赖** | T3.1, T3.3（复用 pretty print） |
@@ -238,7 +238,7 @@ T3.6 (main.rs 集成 + CLI 测试)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§1.4, Arch§6.1 |
 | **railpack 参考** | `rp:cmd/cli/main.go` |
 | **依赖** | T3.2, T3.3, T3.4, T3.5 |

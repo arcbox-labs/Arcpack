@@ -1,0 +1,11 @@
+{
+  "name": "test-vite-spa",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite"
+  },
+  "dependencies": {
+    "vite": "5.0.0"
+  }
+}

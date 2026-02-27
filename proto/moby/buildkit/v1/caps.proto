@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package moby.buildkit.v1.apicaps;
+
+option go_package = "github.com/moby/buildkit/util/apicaps/pb;moby_buildkit_v1_apicaps";
+
+message APICap {
+	string ID = 1;
+	bool Enabled = 2;
+	string Deprecated = 3;
+	string DisabledReason = 4;
+	string DisabledReasonMsg = 5;
+	string DisabledAlternative = 6;
+}

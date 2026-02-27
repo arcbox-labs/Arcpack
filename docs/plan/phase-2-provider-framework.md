@@ -36,7 +36,7 @@ T2.9 (generate_build_plan() + snapshot tests)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.3 |
 | **railpack 参考** | `rp:core/generate/step_builder.go`（StepBuilder interface）, `rp:core/generate/context.go`（BuildStepOptions） |
 | **依赖** | Phase 1 |
@@ -77,7 +77,7 @@ impl BuildStepOptions {
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.3 |
 | **railpack 参考** | `rp:core/generate/command_step_builder.go` |
 | **依赖** | T2.1 |
@@ -135,7 +135,7 @@ pub struct CommandStepBuilder {
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.3 |
 | **railpack 参考** | `rp:core/generate/mise_step_builder.go`, `rp:core/generate/image_step_builder.go` |
 | **依赖** | T2.1, T2.5（Resolver 的 PackageRef 类型） |
@@ -222,7 +222,7 @@ pub struct ImageStepBuilder {
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.2, Arch§3.3 |
 | **railpack 参考** | `rp:core/generate/deploy_builder.go`, `rp:core/generate/cache_context.go`, `rp:core/generate/install_bin_builder.go` |
 | **依赖** | T2.1 |
@@ -316,7 +316,7 @@ pub struct InstallBinBuilder {
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§2.2 (resolver/mise) |
 | **railpack 参考** | `rp:core/mise/mise.go`, `rp:core/mise/install.go`, `rp:core/resolver/resolver.go`, `rp:core/resolver/version.go` |
 | **依赖** | T2.3 |
@@ -406,7 +406,7 @@ pub struct Resolver {
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.2 |
 | **railpack 参考** | `rp:core/generate/context.go` |
 | **依赖** | T2.2, T2.3, T2.4, T2.5 |
@@ -476,7 +476,7 @@ impl Metadata {
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.1, Arch§8.3 |
 | **railpack 参考** | `rp:core/providers/provider.go`, `rp:core/core.go`（getProviders）|
 | **依赖** | T2.6 |
@@ -526,7 +526,7 @@ let matched: Vec<_> = providers.iter()
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.1, Arch 附录 A, Arch 附录 B |
 | **railpack 参考** | `rp:core/providers/node/node.go`, `rp:core/providers/node/package_manager.go` |
 | **依赖** | T2.7 |
@@ -573,7 +573,7 @@ let matched: Vec<_> = providers.iter()
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§6.1, Arch§8.7 |
 | **railpack 参考** | `rp:core/core.go`（GenerateBuildPlan 函数）, `rp:core/core_test.go` |
 | **依赖** | T2.8 |

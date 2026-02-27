@@ -344,7 +344,7 @@ fn build_via_grpc(
         args.output.as_ref().map(std::path::PathBuf::from).as_ref(),
         false, // push
     )
-    .map_err(|e| ArcpackError::Other(e))?;
+    .map_err(ArcpackError::Other)?;
 
     let progress_mode = match args.progress.as_str() {
         "plain" => ProgressMode::Plain,
@@ -354,9 +354,9 @@ fn build_via_grpc(
     };
 
     run_with_daemon("（gRPC）", |addr| async move {
-        let client = GrpcBuildKitClient::new(addr)
+        let client = GrpcBuildKitClient::new(&addr)
             .await
-            .map_err(|e| ArcpackError::Other(e))?;
+            .map_err(ArcpackError::Other)?;
 
         let mut local_dirs = HashMap::new();
         local_dirs.insert(
@@ -377,7 +377,7 @@ fn build_via_grpc(
         client
             .build(request)
             .await
-            .map_err(|e| ArcpackError::Other(e))
+            .map_err(ArcpackError::Other)
     })
 }
 
@@ -492,6 +492,7 @@ pub(crate) fn definition_to_json(
 }
 
 /// 写入导出数据到文件或 stdout（- 表示 stdout）
+#[cfg(feature = "llb")]
 pub(crate) fn write_dump_output(path: &str, data: &[u8]) -> crate::Result<()> {
     if path == "-" {
         use std::io::Write;
@@ -524,7 +525,12 @@ fn inject_github_token_for_mise(
         }
     }
 
-    // 注入到包含 mise install 的步骤
+    // 确保 plan.secrets 包含 GITHUB_TOKEN（通配符展开时会用到）
+    if !plan.secrets.iter().any(|s| s == "GITHUB_TOKEN") {
+        plan.secrets.push("GITHUB_TOKEN".to_string());
+    }
+
+    // 对于显式列出 secrets（非通配符）的步骤，也需要注入
     for step in &mut plan.steps {
         let has_mise = step.commands.iter().any(|cmd| {
             if let crate::plan::Command::Exec(exec) = cmd {
@@ -533,7 +539,10 @@ fn inject_github_token_for_mise(
                 false
             }
         });
-        if has_mise && !step.secrets.contains(&"GITHUB_TOKEN".to_string()) {
+        if has_mise
+            && !step.secrets.iter().any(|s| s == "*")
+            && !step.secrets.contains(&"GITHUB_TOKEN".to_string())
+        {
             step.secrets.push("GITHUB_TOKEN".to_string());
         }
     }
@@ -698,6 +707,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "llb")]
     #[test]
     fn test_write_dump_output_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -707,6 +717,7 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), data);
     }
 
+    #[cfg(feature = "llb")]
     #[test]
     fn test_write_dump_output_dash_does_not_panic() {
         // - 路径写入 stdout，只验证不 panic

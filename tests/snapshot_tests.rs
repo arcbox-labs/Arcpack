@@ -174,3 +174,34 @@ fn test_bun_plan_has_bun_start() {
     let (plan, _, _) = generate_plan_from_fixture("node-bun").unwrap();
     assert_eq!(plan.deploy.start_cmd, Some("bun run start".to_string()));
 }
+
+#[test]
+fn test_snapshot_node_next() {
+    let (plan, _resolved, providers) = generate_plan_from_fixture("node-next").unwrap();
+    assert_eq!(providers, vec!["node"]);
+    // Next.js SSR 模式应使用 npm start
+    assert!(plan.deploy.start_cmd.as_deref().unwrap().contains("start"));
+    insta_settings().bind(|| {
+        insta::assert_json_snapshot!("node-next-plan", plan);
+    });
+}
+
+#[test]
+fn test_snapshot_node_vite_spa() {
+    let (plan, _resolved, providers) = generate_plan_from_fixture("node-vite-spa").unwrap();
+    assert_eq!(providers, vec!["node"]);
+    // SPA 模式应使用 caddy
+    assert!(plan.deploy.start_cmd.as_deref().unwrap().contains("caddy"));
+    insta_settings().bind(|| {
+        insta::assert_json_snapshot!("node-vite-spa-plan", plan);
+    });
+}
+
+#[test]
+fn test_snapshot_node_monorepo() {
+    let (plan, _resolved, providers) = generate_plan_from_fixture("node-monorepo").unwrap();
+    assert_eq!(providers, vec!["node"]);
+    insta_settings().bind(|| {
+        insta::assert_json_snapshot!("node-monorepo-plan", plan);
+    });
+}

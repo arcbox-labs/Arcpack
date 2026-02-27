@@ -27,6 +27,7 @@ fn main() {
                     "proto/moby/buildkit/v1/filesync.proto",
                     "proto/moby/buildkit/v1/secrets.proto",
                     "proto/moby/buildkit/v1/auth.proto",
+                    "proto/moby/buildkit/v1/gateway.proto",
                 ],
                 &["proto/"],
             )

@@ -33,7 +33,7 @@ T4.1 (graph/ 通用 DAG)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.10 |
 | **railpack 参考** | `rp:buildkit/graph/graph.go`, `rp:buildkit/graph/graph_test.go` |
 | **依赖** | Phase 3 |
@@ -113,7 +113,7 @@ T4.1 (graph/ 通用 DAG)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.10 |
 | **railpack 参考** | `rp:buildkit/build_llb/step_node.go`, `rp:buildkit/build_llb/build_env.go` |
 | **依赖** | T4.1 |
@@ -190,7 +190,7 @@ T4.1 (graph/ 通用 DAG)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.10, Arch§8.5 |
 | **railpack 参考** | `rp:buildkit/build_llb/build_graph.go` |
 | **依赖** | T4.2, T4.4, T4.5 |
@@ -273,7 +273,7 @@ T4.1 (graph/ 通用 DAG)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.10 |
 | **railpack 参考** | `rp:buildkit/build_llb/layers.go`, `rp:buildkit/build_llb/layers_test.go` |
 | **依赖** | T4.2 |
@@ -328,7 +328,7 @@ T4.1 (graph/ 通用 DAG)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.10, Arch 附录 B |
 | **railpack 参考** | `rp:buildkit/build_llb/cache_store.go` |
 | **依赖** | T4.2 |
@@ -378,7 +378,7 @@ T4.1 (graph/ 通用 DAG)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§3.10 |
 | **railpack 参考** | `rp:buildkit/image.go`, `rp:buildkit/platform.go`, `rp:buildkit/convert.go` |
 | **依赖** | T4.3 |
@@ -468,7 +468,7 @@ T4.1 (graph/ 通用 DAG)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | BK§3.1, BK§3.2, BK§3.4, Arch§3.10 |
 | **railpack 参考** | 无直接对应（railpack 通过 `BUILDKIT_HOST` 连接外部 daemon；arcpack 独有子进程模式） |
 | **依赖** | Phase 3 |
@@ -522,7 +522,7 @@ T4.1 (graph/ 通用 DAG)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | BK§3.3, BK§3.5 |
 | **railpack 参考** | `rp:buildkit/build.go`（BuildWithBuildkitClient 函数，arcpack Phase A 映射为 buildctl CLI 调用） |
 | **依赖** | T4.7 |
@@ -596,7 +596,7 @@ T4.1 (graph/ 通用 DAG)
 
 | 字段 | 值 |
 |------|---|
-| **状态** | `pending` |
+| **状态** | `completed` |
 | **设计文档** | Arch§6.1, BK§3.5 |
 | **railpack 参考** | `rp:buildkit/build.go`, `rp:cli/build.go` |
 | **依赖** | T4.3, T4.6, T4.7, T4.8 |

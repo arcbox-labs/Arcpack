@@ -1,6 +1,6 @@
 # ArcPack 实施路线图（Implementation Roadmap）
 
-> 版本：v1.0.0 | 日期：2026-02-26 | 状态：待执行
+> 版本：v1.0.0 | 日期：2026-02-27 | 状态：Phase 1-4 + B-1/B-2 已完成，B-3/B-4 进行中
 >
 > 本文档基于 [arcpack-architecture.md](../design/arcpack-architecture.md) 第 7 节的分阶段实施路线，
 > 将每个 Phase 拆解为可独立交付的任务（Task），标注依赖关系、验收标准和 railpack 参考文件。

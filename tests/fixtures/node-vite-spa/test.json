@@ -1,0 +1,6 @@
+{
+  "httpCheck": {
+    "path": "/",
+    "expectedStatus": 200
+  }
+}
