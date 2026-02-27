@@ -1,6 +1,10 @@
 pub mod package_json;
 pub mod package_manager;
 pub mod detect;
+pub mod frameworks;
+pub mod spa;
+pub mod prune;
+pub mod workspace;
 
 use std::collections::HashMap;
 
@@ -24,6 +28,19 @@ const DEFAULT_BUN_VERSION: &str = "latest";
 const COREPACK_HOME: &str = "/opt/corepack";
 /// node_modules 缓存目录
 const NODE_MODULES_CACHE: &str = "/app/node_modules/.cache";
+
+/// Puppeteer/Chromium 所需的 APT 包列表
+const PUPPETEER_APT_PACKAGES: &[&str] = &[
+    "xvfb", "gconf-service", "libasound2", "libatk1.0-0", "libc6",
+    "libcairo2", "libcups2", "libdbus-1-3", "libexpat1", "libfontconfig1",
+    "libgbm1", "libgcc1", "libgconf-2-4", "libgdk-pixbuf2.0-0",
+    "libglib2.0-0", "libgtk-3-0", "libnspr4", "libpango-1.0-0",
+    "libpangocairo-1.0-0", "libstdc++6", "libx11-6", "libx11-xcb1",
+    "libxcb1", "libxcomposite1", "libxcursor1", "libxdamage1", "libxext6",
+    "libxfixes3", "libxi6", "libxrandr2", "libxrender1", "libxss1",
+    "libxtst6", "ca-certificates", "fonts-liberation", "libappindicator1",
+    "libnss3", "lsb-release", "xdg-utils", "wget",
+];
 
 /// Node.js Provider
 ///
@@ -135,6 +152,18 @@ impl NodeProvider {
                 || pkg.has_local_dependency();
         }
         false
+    }
+
+    /// 检测 Puppeteer 依赖
+    fn has_puppeteer(pkg: &PackageJson) -> bool {
+        pkg.has_dependency("puppeteer")
+            || pkg.has_dependency("puppeteer-core")
+            || pkg.has_dependency("puppeteer-extra")
+    }
+
+    /// 获取 Puppeteer APT 包列表
+    fn get_puppeteer_apt_packages() -> Vec<String> {
+        PUPPETEER_APT_PACKAGES.iter().map(|s| s.to_string()).collect()
     }
 
     /// 确保 mise_step_builder 已初始化
@@ -388,6 +417,21 @@ impl Provider for NodeProvider {
         ctx.deploy
             .add_inputs(&[mise_layer, node_modules_layer, build_layer]);
 
+        // Puppeteer 检测 → 添加 Chromium APT 依赖
+        if let Some(ref pkg) = self.package_json {
+            if Self::has_puppeteer(pkg) {
+                ctx.deploy.add_apt_packages(&Self::get_puppeteer_apt_packages());
+                ctx.logs.info("detected Puppeteer dependency, adding Chromium APT packages");
+            }
+        }
+
+        // COREPACK_HOME 环境变量（deploy）
+        if uses_corepack {
+            ctx.deploy
+                .variables
+                .insert("COREPACK_HOME".to_string(), COREPACK_HOME.to_string());
+        }
+
         Ok(())
     }
 
@@ -627,5 +671,26 @@ mod tests {
         let cmd = provider.get_start_command(&ctx);
         assert!(cmd.is_some());
         assert!(cmd.unwrap().contains("index.js"));
+    }
+
+    #[test]
+    fn test_has_puppeteer() {
+        let pkg: PackageJson =
+            serde_json::from_str(r#"{"dependencies":{"puppeteer":"^21.0.0"}}"#).unwrap();
+        assert!(NodeProvider::has_puppeteer(&pkg));
+    }
+
+    #[test]
+    fn test_has_puppeteer_core() {
+        let pkg: PackageJson =
+            serde_json::from_str(r#"{"devDependencies":{"puppeteer-core":"^21.0.0"}}"#).unwrap();
+        assert!(NodeProvider::has_puppeteer(&pkg));
+    }
+
+    #[test]
+    fn test_no_puppeteer() {
+        let pkg: PackageJson =
+            serde_json::from_str(r#"{"dependencies":{"express":"^4.0.0"}}"#).unwrap();
+        assert!(!NodeProvider::has_puppeteer(&pkg));
     }
 }

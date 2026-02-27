@@ -101,6 +101,7 @@ impl App {
     pub fn read_json<T: DeserializeOwned>(&self, name: &str) -> Result<T> {
         let content = self.read_file(name)?;
         let cleaned = strip_jsonc_comments(&content);
+        let cleaned = strip_trailing_commas(&cleaned);
 
         serde_json::from_str(&cleaned).map_err(|e| ArcpackError::ConfigParse {
             path: name.to_string(),
@@ -302,6 +303,62 @@ fn strip_jsonc_comments(input: &str) -> String {
     result
 }
 
+/// 移除 JSON 中的尾随逗号（HuJSON/JSONC 兼容）
+///
+/// 匹配 `},` → `}`, `],` → `]` 以及值后面紧跟 `}` 或 `]` 前的逗号。
+/// 在字符串内部的逗号不受影响。
+fn strip_trailing_commas(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let chars: Vec<char> = input.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+    let mut in_string = false;
+
+    while i < len {
+        let ch = chars[i];
+
+        if in_string {
+            if ch == '\\' && i + 1 < len {
+                result.push(ch);
+                result.push(chars[i + 1]);
+                i += 2;
+                continue;
+            }
+            if ch == '"' {
+                in_string = false;
+            }
+            result.push(ch);
+            i += 1;
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            result.push(ch);
+            i += 1;
+            continue;
+        }
+
+        if ch == ',' {
+            // 向前查看下一个非空白字符是否为 } 或 ]
+            let mut j = i + 1;
+            while j < len && chars[j].is_whitespace() {
+                j += 1;
+            }
+            if j < len && (chars[j] == '}' || chars[j] == ']') {
+                // 跳过尾随逗号，保留空白
+                i += 1;
+                continue;
+            }
+        }
+
+        result.push(ch);
+        i += 1;
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -496,5 +553,64 @@ mod tests {
         let value: serde_json::Value = app.read_json("config.json").unwrap();
         assert_eq!(value["name"], "test");
         assert_eq!(value["url"], "https://example.com");
+    }
+
+    #[test]
+    fn test_strip_trailing_commas_object() {
+        let input = r#"{"a": 1, "b": 2,}"#;
+        let result = strip_trailing_commas(input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["a"], 1);
+        assert_eq!(parsed["b"], 2);
+    }
+
+    #[test]
+    fn test_strip_trailing_commas_array() {
+        let input = r#"[1, 2, 3,]"#;
+        let result = strip_trailing_commas(input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed.as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_strip_trailing_commas_nested() {
+        let input = r#"{"arr": [1, 2,], "obj": {"x": 1,},}"#;
+        let result = strip_trailing_commas(input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["arr"].as_array().unwrap().len(), 2);
+        assert_eq!(parsed["obj"]["x"], 1);
+    }
+
+    #[test]
+    fn test_strip_trailing_commas_preserves_strings() {
+        let input = r#"{"msg": "hello,}", "ok": true,}"#;
+        let result = strip_trailing_commas(input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["msg"], "hello,}");
+        assert_eq!(parsed["ok"], true);
+    }
+
+    #[test]
+    fn test_read_json_hujson_full() {
+        // 测试注释 + 尾随逗号的完整 HuJSON 支持
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("test.json"),
+            r#"{
+  // comment
+  "name": "test",
+  "items": [1, 2,],
+  "nested": {
+    "key": "value", // inline comment
+  },
+}"#,
+        )
+        .unwrap();
+
+        let app = App::new(dir.path()).unwrap();
+        let value: serde_json::Value = app.read_json("test.json").unwrap();
+        assert_eq!(value["name"], "test");
+        assert_eq!(value["items"].as_array().unwrap().len(), 2);
+        assert_eq!(value["nested"]["key"], "value");
     }
 }
