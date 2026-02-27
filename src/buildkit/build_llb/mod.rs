@@ -122,6 +122,44 @@ impl BuildGraph {
         })
     }
 
+    /// 检查节点状态：已处理 → false，进行中 → 循环错误，待处理 → true
+    fn check_node_status(&self, name: &str) -> Result<bool> {
+        let node = self.graph.get_node(name).ok_or_else(|| {
+            anyhow::anyhow!("节点未找到: {}", name)
+        })?;
+        if node.processed {
+            return Ok(false);
+        }
+        if node.in_progress {
+            return Err(crate::ArcpackError::CycleDetected {
+                node: name.to_string(),
+            });
+        }
+        Ok(true)
+    }
+
+    /// 合并父节点的 output_env 到本节点的 input_env，并标记 in_progress
+    fn merge_parent_envs(&mut self, name: &str, parent_names: &[String]) {
+        let mut merged_env = BuildEnvironment::new();
+        for parent_name in parent_names {
+            if let Some(parent_node) = self.graph.get_node(parent_name) {
+                merged_env.merge(&parent_node.output_env);
+            }
+        }
+        if let Some(node) = self.graph.get_node_mut(name) {
+            node.input_env = merged_env;
+            node.in_progress = true;
+        }
+    }
+
+    /// 标记节点处理完成
+    fn mark_node_done(&mut self, name: &str) {
+        if let Some(node) = self.graph.get_node_mut(name) {
+            node.processed = true;
+            node.in_progress = false;
+        }
+    }
+
     /// 递归处理节点
     ///
     /// 1. 跳过已处理节点
@@ -130,51 +168,18 @@ impl BuildGraph {
     /// 4. 合并父节点的 output_env 到本节点的 input_env
     /// 5. 转换为 Dockerfile 阶段
     fn process_node(&mut self, name: &str) -> Result<()> {
-        // 检查是否已处理
-        {
-            let node = self.graph.get_node(name).ok_or_else(|| {
-                anyhow::anyhow!("节点未找到: {}", name)
-            })?;
-            if node.processed {
-                return Ok(());
-            }
-            if node.in_progress {
-                return Err(crate::ArcpackError::CycleDetected {
-                    node: name.to_string(),
-                });
-            }
+        if !self.check_node_status(name)? {
+            return Ok(());
         }
 
-        // 获取父节点列表（clone 避免借用冲突）
         let parent_names: Vec<String> = self.graph.get_parents(name).to_vec();
-
-        // 递归处理父节点
         for parent_name in &parent_names {
             self.process_node(parent_name)?;
         }
+        self.merge_parent_envs(name, &parent_names);
 
-        // 合并父节点的 output_env 到本节点的 input_env
-        {
-            let mut merged_env = BuildEnvironment::new();
-            for parent_name in &parent_names {
-                if let Some(parent_node) = self.graph.get_node(parent_name) {
-                    merged_env.merge(&parent_node.output_env);
-                }
-            }
-            if let Some(node) = self.graph.get_node_mut(name) {
-                node.input_env = merged_env;
-                node.in_progress = true;
-            }
-        }
-
-        // 转换节点为 Dockerfile 阶段
         self.convert_node_to_dockerfile(name)?;
-
-        // 标记完成
-        if let Some(node) = self.graph.get_node_mut(name) {
-            node.processed = true;
-            node.in_progress = false;
-        }
+        self.mark_node_done(name);
 
         Ok(())
     }
@@ -278,6 +283,23 @@ impl BuildGraph {
         Ok(())
     }
 
+    /// 解析 step 的 secret 引用，展开通配符
+    ///
+    /// 返回 Some(names) 如果有 secrets，None 如果无
+    fn resolve_secret_names(&self, step_secrets: &[String]) -> Option<Vec<String>> {
+        match step_secrets {
+            [] => None,
+            s if s.iter().any(|s| s == "*") => {
+                if self.plan.secrets.is_empty() {
+                    None
+                } else {
+                    Some(self.plan.secrets.clone())
+                }
+            }
+            _ => Some(step_secrets.to_vec()),
+        }
+    }
+
     /// 转换 Exec 命令为 RUN 指令
     ///
     /// 生成格式：RUN [--mount=type=cache,...] [--mount=type=secret,...] {cmd}
@@ -301,19 +323,9 @@ impl BuildGraph {
         }
 
         // Secret 挂载
-        let has_secrets = match step_secrets {
-            [] => false,
-            s if s.contains(&"*".to_string()) => !self.plan.secrets.is_empty(),
-            _ => true,
-        };
-
-        if has_secrets {
-            let secret_names = if step_secrets.contains(&"*".to_string()) {
-                self.plan.secrets.clone()
-            } else {
-                step_secrets.to_vec()
-            };
-            for secret_name in &secret_names {
+        let secret_names = self.resolve_secret_names(step_secrets);
+        if let Some(ref names) = secret_names {
+            for secret_name in names {
                 mounts.push(format!("--mount=type=secret,id={}", secret_name));
             }
         }
@@ -326,7 +338,7 @@ impl BuildGraph {
         }
 
         // 如果有 secrets 且 secrets_hash 存在，添加失效注释
-        if has_secrets {
+        if secret_names.is_some() {
             if let Some(ref hash) = secrets_hash {
                 line.push_str(&format!(" SECRETS_HASH={}", hash));
             }
@@ -378,21 +390,17 @@ impl BuildGraph {
         let deploy: &Deploy = &self.plan.deploy;
         let mut lines: Vec<String> = Vec::new();
 
-        // FROM 指令
-        let from_line = if let Some(ref base) = deploy.base {
-            if let Some(ref image) = base.image {
-                format!("FROM {} AS deploy", image)
-            } else if let Some(ref step_name) = base.step {
-                // 步骤引用需要 sanitize
-                let safe_name = layers::sanitize_stage_name(step_name);
-                format!("FROM {} AS deploy", safe_name)
-            } else {
-                format!("FROM {} AS deploy", ARCPACK_RUNTIME_IMAGE)
-            }
-        } else {
-            format!("FROM {} AS deploy", ARCPACK_RUNTIME_IMAGE)
-        };
-        lines.push(from_line);
+        // FROM 指令：image → step(sanitized) → 默认运行时
+        let base_ref = deploy
+            .base
+            .as_ref()
+            .and_then(|base| {
+                base.image
+                    .clone()
+                    .or_else(|| base.step.as_ref().map(|s| layers::sanitize_stage_name(s)))
+            })
+            .unwrap_or_else(|| ARCPACK_RUNTIME_IMAGE.to_string());
+        lines.push(format!("FROM {} AS deploy", base_ref));
 
         // COPY --from 输入层
         for input in &deploy.inputs {
@@ -488,43 +496,15 @@ impl BuildGraph {
     /// - 每个 Exec 必须携带完整环境变量
     #[cfg(feature = "llb")]
     fn process_node_llb(&mut self, name: &str) -> Result<()> {
-
-        // 检查是否已处理 / 循环检测
-        {
-            let node = self.graph.get_node(name).ok_or_else(|| {
-                anyhow::anyhow!("节点未找到: {}", name)
-            })?;
-            if node.processed {
-                return Ok(());
-            }
-            if node.in_progress {
-                return Err(crate::ArcpackError::CycleDetected {
-                    node: name.to_string(),
-                });
-            }
+        if !self.check_node_status(name)? {
+            return Ok(());
         }
 
-        // 获取父节点列表
         let parent_names: Vec<String> = self.graph.get_parents(name).to_vec();
-
-        // 递归处理父节点
         for parent_name in &parent_names {
             self.process_node_llb(parent_name)?;
         }
-
-        // 合并父节点 output_env → input_env
-        {
-            let mut merged_env = BuildEnvironment::new();
-            for parent_name in &parent_names {
-                if let Some(parent_node) = self.graph.get_node(parent_name) {
-                    merged_env.merge(&parent_node.output_env);
-                }
-            }
-            if let Some(node) = self.graph.get_node_mut(name) {
-                node.input_env = merged_env;
-                node.in_progress = true;
-            }
-        }
+        self.merge_parent_envs(name, &parent_names);
 
         // 执行可失败的转换逻辑；出错时复位 in_progress
         let result = self.do_process_node_llb(name);
@@ -588,13 +568,12 @@ impl BuildGraph {
             }
         }
 
-        // 存储 llb_state + output_env
+        // 存储 llb_state + output_env，然后标记完成
         if let Some(node) = self.graph.get_node_mut(name) {
             node.set_llb_state(current_state);
             node.output_env = output_env;
-            node.processed = true;
-            node.in_progress = false;
         }
+        self.mark_node_done(name);
 
         Ok(())
     }
@@ -671,23 +650,10 @@ impl BuildGraph {
         }
 
         // Secret 挂载
-        let has_secrets = match step.secrets.as_slice() {
-            [] => false,
-            s if s.iter().any(|s| s == "*") => !self.plan.secrets.is_empty(),
-            _ => true,
-        };
-
-        if has_secrets {
-            let secret_names = if step.secrets.iter().any(|s| s == "*") {
-                self.plan.secrets.clone()
-            } else {
-                step.secrets.clone()
-            };
+        if let Some(secret_names) = self.resolve_secret_names(&step.secrets) {
             for secret_name in &secret_names {
                 builder = builder.add_secret_env(secret_name, secret_name);
             }
-
-            // 有 secrets 且有 secrets_hash → 注入 _SECRET_HASH env
             if let Some(hash) = secrets_hash {
                 builder = builder.env("_SECRET_HASH", hash);
             }

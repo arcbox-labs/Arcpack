@@ -9,3 +9,8 @@ pub mod platform;
 pub mod proto;
 #[cfg(feature = "llb")]
 pub mod llb;
+
+#[cfg(feature = "grpc")]
+pub mod grpc;
+#[cfg(feature = "grpc")]
+pub mod grpc_client;
