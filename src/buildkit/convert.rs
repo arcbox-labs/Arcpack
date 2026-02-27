@@ -4,6 +4,9 @@ use super::image::{build_image_config, ImageConfig};
 use super::platform::Platform;
 use crate::plan::BuildPlan;
 
+#[cfg(feature = "llb")]
+use crate::buildkit::proto::pb;
+
 /// 转换选项
 ///
 /// 对齐 railpack `ConvertPlanOptions`
@@ -43,6 +46,41 @@ pub fn convert_plan_to_dockerfile(
 
     Ok(ConvertResult {
         dockerfile: output.dockerfile,
+        image_config,
+    })
+}
+
+/// LLB 转换结果
+#[cfg(feature = "llb")]
+#[derive(Debug)]
+pub struct LlbConvertResult {
+    pub definition: pb::Definition,
+    pub image_config: ImageConfig,
+}
+
+/// 将 BuildPlan 转换为 LLB Definition + ImageConfig
+///
+/// 对齐 railpack `ConvertPlanToLLB()`（Phase B 版本）
+#[cfg(feature = "llb")]
+pub fn convert_plan_to_llb(
+    plan: &BuildPlan,
+    opts: &ConvertPlanOptions,
+) -> crate::Result<LlbConvertResult> {
+    let cache_store = BuildKitCacheStore::new(&opts.cache_key);
+
+    let mut build_graph = BuildGraph::new(
+        plan.clone(),
+        cache_store,
+        opts.secrets_hash.clone(),
+        opts.platform.clone(),
+    )?;
+
+    let (definition, output_env) = build_graph.to_llb()?;
+
+    let image_config = build_image_config(&output_env, &plan.deploy, &opts.platform);
+
+    Ok(LlbConvertResult {
+        definition,
         image_config,
     })
 }
@@ -168,5 +206,66 @@ mod tests {
             vec!["/bin/bash", "-c"],
             "ImageConfig.entrypoint 应为 [/bin/bash, -c]"
         );
+    }
+
+    // === LLB 转换测试 ===
+
+    #[cfg(feature = "llb")]
+    mod llb_tests {
+        use super::*;
+
+        #[test]
+        fn test_convert_plan_to_llb_basic() {
+            let plan = simple_plan();
+            let opts = default_opts();
+
+            let result = convert_plan_to_llb(&plan, &opts).unwrap();
+
+            // Definition 非空
+            assert!(
+                !result.definition.def.is_empty(),
+                "LLB Definition.def 不应为空"
+            );
+            // ImageConfig 有效
+            assert_eq!(result.image_config.working_dir, "/app");
+            assert_eq!(result.image_config.cmd, vec!["node server.js"]);
+            assert_eq!(
+                result.image_config.entrypoint,
+                vec!["/bin/bash", "-c"],
+            );
+        }
+
+        #[test]
+        fn test_convert_plan_to_llb_image_config_consistent() {
+            let plan = simple_plan();
+            let opts = default_opts();
+
+            // Phase A
+            let dockerfile_result = convert_plan_to_dockerfile(&plan, &opts).unwrap();
+            // Phase B
+            let llb_result = convert_plan_to_llb(&plan, &opts).unwrap();
+
+            // ImageConfig 应一致
+            assert_eq!(
+                dockerfile_result.image_config.working_dir,
+                llb_result.image_config.working_dir,
+                "working_dir 应与 Phase A 一致"
+            );
+            assert_eq!(
+                dockerfile_result.image_config.entrypoint,
+                llb_result.image_config.entrypoint,
+                "entrypoint 应与 Phase A 一致"
+            );
+            assert_eq!(
+                dockerfile_result.image_config.cmd,
+                llb_result.image_config.cmd,
+                "cmd 应与 Phase A 一致"
+            );
+            assert_eq!(
+                dockerfile_result.image_config.env,
+                llb_result.image_config.env,
+                "env 应与 Phase A 一致"
+            );
+        }
     }
 }

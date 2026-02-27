@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+#[cfg(feature = "llb")]
+use crate::buildkit::llb::exec::{CacheSharingMode, MountSpec};
 use crate::plan::{Cache, CacheType};
 
 /// BuildKit 缓存条目
@@ -49,6 +51,22 @@ impl BuildKitCacheStore {
             );
         }
         self.cache_map.get(key).unwrap()
+    }
+
+    /// 生成 LLB 缓存挂载规格
+    ///
+    /// 返回 `MountSpec::Cache`，包含目标路径、缓存键和共享模式
+    #[cfg(feature = "llb")]
+    pub fn get_cache_mount_spec(&mut self, key: &str, plan_cache: &Cache) -> MountSpec {
+        let cache = self.get_cache(key, plan_cache);
+        MountSpec::Cache {
+            target: cache.plan_cache.directory.clone(),
+            cache_id: cache.cache_key.clone(),
+            sharing: match cache.plan_cache.cache_type {
+                CacheType::Locked => CacheSharingMode::Locked,
+                _ => CacheSharingMode::Shared,
+            },
+        }
     }
 
     /// 生成 cache mount 选项字符串
@@ -102,6 +120,69 @@ mod tests {
         let cache = Cache::new("/root/.npm");
         let result = store.get_cache("npm", &cache);
         assert_eq!(result.cache_key, "npm");
+    }
+
+    #[cfg(feature = "llb")]
+    #[test]
+    fn test_cache_mount_spec_shared() {
+        use crate::buildkit::llb::exec::{CacheSharingMode, MountSpec};
+        let mut store = BuildKitCacheStore::new("app");
+        let cache = Cache::new("/root/.npm");
+        let spec = store.get_cache_mount_spec("npm", &cache);
+        match spec {
+            MountSpec::Cache { target, cache_id, sharing } => {
+                assert_eq!(target, "/root/.npm");
+                assert_eq!(cache_id, "app-npm");
+                assert!(matches!(sharing, CacheSharingMode::Shared));
+            }
+            _ => panic!("应为 MountSpec::Cache"),
+        }
+    }
+
+    #[cfg(feature = "llb")]
+    #[test]
+    fn test_cache_mount_spec_locked() {
+        use crate::buildkit::llb::exec::{CacheSharingMode, MountSpec};
+        let mut store = BuildKitCacheStore::new("app");
+        let cache = Cache::new_locked("/var/cache/apt");
+        let spec = store.get_cache_mount_spec("apt", &cache);
+        match spec {
+            MountSpec::Cache { sharing, .. } => {
+                assert!(matches!(sharing, CacheSharingMode::Locked));
+            }
+            _ => panic!("应为 MountSpec::Cache"),
+        }
+    }
+
+    #[cfg(feature = "llb")]
+    #[test]
+    fn test_cache_mount_spec_prefix() {
+        use crate::buildkit::llb::exec::MountSpec;
+        let mut store = BuildKitCacheStore::new("project-42");
+        let cache = Cache::new("/cache");
+        let spec = store.get_cache_mount_spec("build", &cache);
+        match spec {
+            MountSpec::Cache { cache_id, .. } => {
+                assert!(cache_id.starts_with("project-42-"), "cache_id 应带前缀");
+                assert_eq!(cache_id, "project-42-build");
+            }
+            _ => panic!("应为 MountSpec::Cache"),
+        }
+    }
+
+    #[cfg(feature = "llb")]
+    #[test]
+    fn test_cache_mount_spec_empty_unique_id() {
+        use crate::buildkit::llb::exec::MountSpec;
+        let mut store = BuildKitCacheStore::new("");
+        let cache = Cache::new("/cache");
+        let spec = store.get_cache_mount_spec("npm", &cache);
+        match spec {
+            MountSpec::Cache { cache_id, .. } => {
+                assert_eq!(cache_id, "npm", "空前缀时 cache_id 应等于裸 key");
+            }
+            _ => panic!("应为 MountSpec::Cache"),
+        }
     }
 
     #[test]

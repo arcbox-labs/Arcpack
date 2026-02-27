@@ -1,10 +1,17 @@
-/// Layer 合并策略 —— 决定多个 Layer 如何转换为 Dockerfile 片段
-///
-/// 对齐 railpack `buildkit/build_llb/layers.go`。
-/// 核心逻辑：判断多个 Layer 是否可以 merge（高效但不能重叠），
-/// 还是必须逐层 copy（安全但可能冗余）。
+//! Layer 合并策略 —— 决定多个 Layer 如何转换为 Dockerfile 片段
+//!
+//! 对齐 railpack `buildkit/build_llb/layers.go`。
+//! 核心逻辑：判断多个 Layer 是否可以 merge（高效但不能重叠），
+//! 还是必须逐层 copy（安全但可能冗余）。
 
 use std::path::Path;
+
+#[cfg(feature = "llb")]
+use std::collections::HashMap;
+#[cfg(feature = "llb")]
+use crate::buildkit::llb::{self, OperationOutput};
+#[cfg(feature = "llb")]
+use super::step_node::StepNode;
 
 use crate::plan::{Filter, Layer};
 
@@ -119,8 +126,8 @@ pub fn should_merge(layers: &[Layer]) -> bool {
         }
 
         // 条件 4：检查与后续层的显著重叠
-        for j in (i + 1)..layers.len() {
-            if has_significant_overlap(layer, &layers[j]) {
+        for other in &layers[i + 1..] {
+            if has_significant_overlap(layer, other) {
                 return false;
             }
         }
@@ -332,6 +339,165 @@ fn sanitize_layer_ref(layer: &Layer) -> Option<String> {
     } else {
         layer.image.clone()
     }
+}
+
+// ============================================================
+// LLB 策略：Layer → OperationOutput
+// ============================================================
+
+/// 从 Layer 列表生成 LLB OperationOutput
+///
+/// 对齐 Dockerfile 版本 `get_full_state_from_layers()`，但输出为 LLB 状态。
+/// 根据 should_merge() 决定使用 merge 或 copy 策略。
+#[cfg(feature = "llb")]
+pub fn get_full_state_from_layers_llb(
+    layers: &[Layer],
+    step_nodes: &HashMap<String, &StepNode>,
+    base_image: &OperationOutput,
+) -> crate::Result<OperationOutput> {
+    if layers.is_empty() {
+        return Ok(base_image.clone());
+    }
+
+    if layers.len() == 1 {
+        return convert_single_layer_llb(&layers[0], step_nodes, base_image);
+    }
+
+    if should_merge(layers) {
+        merge_layers_llb(layers, step_nodes, base_image)
+    } else {
+        copy_layers_llb(layers, step_nodes, base_image)
+    }
+}
+
+/// 单个 Layer 转换为 LLB 状态
+#[cfg(feature = "llb")]
+fn layer_to_llb_state(
+    layer: &Layer,
+    step_nodes: &HashMap<String, &StepNode>,
+) -> crate::Result<OperationOutput> {
+    if let Some(ref step_name) = layer.step {
+        let node = step_nodes.get(step_name.as_str()).ok_or_else(|| {
+            anyhow::anyhow!("layer 引用不存在的 step: {}", step_name)
+        })?;
+        node.get_llb_state().cloned().ok_or_else(|| {
+            anyhow::anyhow!("step {} 尚未生成 llb_state", step_name)
+        }.into())
+    } else if let Some(ref image_name) = layer.image {
+        Ok(llb::image(image_name))
+    } else if layer.local == Some(true) {
+        Ok(llb::local("context"))
+    } else {
+        Err(anyhow::anyhow!("layer 缺少 step/image/local 引用").into())
+    }
+}
+
+/// 单 layer 转换
+///
+/// 无 filter → 直接返回 layer state
+/// 有 filter → copy 指定路径到 base_image
+#[cfg(feature = "llb")]
+fn convert_single_layer_llb(
+    layer: &Layer,
+    step_nodes: &HashMap<String, &StepNode>,
+    base_image: &OperationOutput,
+) -> crate::Result<OperationOutput> {
+    let layer_state = layer_to_llb_state(layer, step_nodes)?;
+
+    if layer.filter.include.is_empty() {
+        return Ok(layer_state);
+    }
+
+    // 有 filter：逐路径 copy 到 base_image
+    let is_local = layer.local == Some(true);
+    let mut state = base_image.clone();
+    for path in &layer.filter.include {
+        let (src_path, dest_path) = resolve_paths(path, is_local);
+        state = llb::copy(layer_state.clone(), &src_path, state, &dest_path);
+    }
+    Ok(state)
+}
+
+/// Merge 策略：首层为基，后续层 copy 到 scratch 再 merge
+///
+/// BuildKit MergeOp 要求每个输入是 diff（增量层），不是 full state。
+/// 因此后续层必须 copy 到 scratch 而非直接使用 full state。
+#[cfg(feature = "llb")]
+fn merge_layers_llb(
+    layers: &[Layer],
+    step_nodes: &HashMap<String, &StepNode>,
+    base_image: &OperationOutput,
+) -> crate::Result<OperationOutput> {
+    // 首层作为基础
+    let first_state = layer_to_llb_state(&layers[0], step_nodes)?;
+
+    // 如果首层有 filter，copy 到 base_image
+    let base = if !layers[0].filter.include.is_empty() {
+        let is_local = layers[0].local == Some(true);
+        let mut state = base_image.clone();
+        for path in &layers[0].filter.include {
+            let (src_path, dest_path) = resolve_paths(path, is_local);
+            state = llb::copy(first_state.clone(), &src_path, state, &dest_path);
+        }
+        state
+    } else {
+        first_state
+    };
+
+    // 后续层 copy 到 scratch（生成 diff），然后 merge
+    let mut merge_inputs = vec![base.clone()];
+    for layer in &layers[1..] {
+        let layer_state = layer_to_llb_state(layer, step_nodes)?;
+        let is_local = layer.local == Some(true);
+
+        // Copy 到 scratch 形成 diff 层
+        let scratch = llb::scratch();
+        let mut diff = scratch;
+        if layer.filter.include.is_empty() {
+            diff = llb::copy(layer_state.clone(), "/", diff, "/");
+        } else {
+            for path in &layer.filter.include {
+                let (src_path, dest_path) = resolve_paths(path, is_local);
+                diff = llb::copy(layer_state.clone(), &src_path, diff, &dest_path);
+            }
+        }
+        merge_inputs.push(diff);
+    }
+
+    if merge_inputs.len() == 1 {
+        return Ok(base);
+    }
+
+    llb::merge(merge_inputs)
+}
+
+/// Copy 策略：首层为基，后续层逐路径 copy 叠加
+#[cfg(feature = "llb")]
+fn copy_layers_llb(
+    layers: &[Layer],
+    step_nodes: &HashMap<String, &StepNode>,
+    _base_image: &OperationOutput,
+) -> crate::Result<OperationOutput> {
+    // 首层作为基础
+    let mut state = layer_to_llb_state(&layers[0], step_nodes)?;
+
+    // 后续层逐路径 copy 叠加
+    for layer in &layers[1..] {
+        let layer_state = layer_to_llb_state(layer, step_nodes)?;
+        let is_local = layer.local == Some(true);
+
+        if layer.filter.include.is_empty() {
+            // 无 filter → copy 整体
+            state = llb::copy(layer_state, "/", state, "/");
+        } else {
+            for path in &layer.filter.include {
+                let (src_path, dest_path) = resolve_paths(path, is_local);
+                state = llb::copy(layer_state.clone(), &src_path, state, &dest_path);
+            }
+        }
+    }
+
+    Ok(state)
 }
 
 #[cfg(test)]
@@ -803,5 +969,148 @@ mod tests {
         // local layer 的 include 是 ["."]
         assert_eq!(result.copy_instructions.len(), 1);
         assert!(result.copy_instructions[0].contains("/app/."));
+    }
+
+    // === LLB 策略测试 ===
+
+    #[cfg(feature = "llb")]
+    mod llb_tests {
+        use super::*;
+        use crate::buildkit::llb::source::image;
+        use crate::plan::Step;
+
+        /// 辅助函数：创建带 llb_state 的 StepNode
+        fn make_step_node_with_state(name: &str) -> StepNode {
+            let step = Step::new(name);
+            let mut node = StepNode::new(step);
+            // 用 image 作为 llb_state（简单模拟已处理的节点）
+            node.set_llb_state(image(&format!("test-{}", name)));
+            node
+        }
+
+        #[test]
+        fn test_layers_llb_empty_returns_base() {
+            let base = image("ubuntu:22.04");
+            let result = get_full_state_from_layers_llb(
+                &[],
+                &HashMap::new(),
+                &base,
+            ).unwrap();
+            assert_eq!(result.serialized_op.digest, base.serialized_op.digest);
+        }
+
+        #[test]
+        fn test_layers_llb_single_step() {
+            let node = make_step_node_with_state("install");
+            let expected_digest = node.get_llb_state().unwrap().serialized_op.digest.clone();
+            let nodes: HashMap<String, &StepNode> =
+                [("install".to_string(), &node)].into_iter().collect();
+
+            let layers = vec![Layer::new_step_layer("install", None)];
+            let base = image("ubuntu:22.04");
+            let result = get_full_state_from_layers_llb(&layers, &nodes, &base).unwrap();
+            // 无 filter → 直接返回 step 的 llb_state
+            assert_eq!(result.serialized_op.digest, expected_digest);
+        }
+
+        #[test]
+        fn test_layers_llb_single_image() {
+            let layers = vec![Layer::new_image_layer("node:20", None)];
+            let base = image("ubuntu:22.04");
+            let result = get_full_state_from_layers_llb(
+                &layers,
+                &HashMap::new(),
+                &base,
+            ).unwrap();
+            // 无 filter → 返回 image 状态
+            let expected = image("node:20");
+            assert_eq!(result.serialized_op.digest, expected.serialized_op.digest);
+        }
+
+        #[test]
+        fn test_layers_llb_single_with_filter() {
+            let node = make_step_node_with_state("build");
+            let nodes: HashMap<String, &StepNode> =
+                [("build".to_string(), &node)].into_iter().collect();
+
+            let filter = Filter::include_only(vec!["/app/dist".to_string()]);
+            let layers = vec![Layer::new_step_layer("build", Some(filter))];
+            let base = image("ubuntu:22.04");
+            let result = get_full_state_from_layers_llb(&layers, &nodes, &base).unwrap();
+            // 有 filter → 生成 copy 链，digest 不同于 base 和 node
+            assert_ne!(result.serialized_op.digest, base.serialized_op.digest);
+        }
+
+        #[test]
+        fn test_layers_llb_merge_strategy() {
+            // 两个不重叠层 → should_merge = true → merge 策略
+            let node1 = make_step_node_with_state("install");
+            let node2 = make_step_node_with_state("build");
+            let nodes: HashMap<String, &StepNode> = [
+                ("install".to_string(), &node1),
+                ("build".to_string(), &node2),
+            ].into_iter().collect();
+
+            let layers = vec![
+                Layer::new_step_layer("install", Some(Filter::include_only(
+                    vec!["/app/node_modules".to_string()],
+                ))),
+                Layer::new_step_layer("build", Some(Filter::include_only(
+                    vec!["/root/.cache".to_string()],
+                ))),
+            ];
+            assert!(should_merge(&layers), "层不重叠应使用 merge");
+
+            let base = image("ubuntu:22.04");
+            let result = get_full_state_from_layers_llb(&layers, &nodes, &base).unwrap();
+            assert_ne!(result.serialized_op.digest, base.serialized_op.digest);
+        }
+
+        #[test]
+        fn test_layers_llb_copy_strategy() {
+            // 两个重叠层 → should_merge = false → copy 策略
+            let node1 = make_step_node_with_state("install");
+            let node2 = make_step_node_with_state("build");
+            let nodes: HashMap<String, &StepNode> = [
+                ("install".to_string(), &node1),
+                ("build".to_string(), &node2),
+            ].into_iter().collect();
+
+            let layers = vec![
+                Layer::new_step_layer("install", None),
+                Layer::new_step_layer("build", None),
+            ];
+            assert!(!should_merge(&layers), "非首层无 include 不应 merge");
+
+            let base = image("ubuntu:22.04");
+            let result = get_full_state_from_layers_llb(&layers, &nodes, &base).unwrap();
+            assert_ne!(result.serialized_op.digest, base.serialized_op.digest);
+        }
+
+        #[test]
+        fn test_layer_to_llb_state_missing_step_errors() {
+            let layers = vec![Layer::new_step_layer("nonexistent", None)];
+            let base = image("ubuntu:22.04");
+            let result = get_full_state_from_layers_llb(
+                &layers,
+                &HashMap::new(),
+                &base,
+            );
+            assert!(result.is_err(), "引用不存在的 step 应返回错误");
+        }
+
+        #[test]
+        fn test_layer_to_llb_state_unprocessed_step_errors() {
+            // StepNode 无 llb_state
+            let step = Step::new("unprocessed");
+            let node = StepNode::new(step);
+            let nodes: HashMap<String, &StepNode> =
+                [("unprocessed".to_string(), &node)].into_iter().collect();
+
+            let layers = vec![Layer::new_step_layer("unprocessed", None)];
+            let base = image("ubuntu:22.04");
+            let result = get_full_state_from_layers_llb(&layers, &nodes, &base);
+            assert!(result.is_err(), "未处理的 step 应返回错误");
+        }
     }
 }

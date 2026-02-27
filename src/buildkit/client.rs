@@ -4,6 +4,9 @@ use std::time::{Duration, Instant};
 
 use crate::ArcpackError;
 
+#[cfg(feature = "llb")]
+use prost::Message;
+
 /// 构建请求
 #[derive(Debug, Clone)]
 pub struct BuildRequest {
@@ -36,6 +39,38 @@ pub struct BuildOutput {
     pub image_digest: Option<String>,
     /// 构建耗时
     pub duration: Duration,
+}
+
+/// 追加输出配置参数（image/local）到 args
+fn push_output_args(
+    args: &mut Vec<String>,
+    image_name: &Option<String>,
+    push: bool,
+    output_dir: &Option<PathBuf>,
+) {
+    if let Some(ref name) = image_name {
+        if push {
+            args.push("--output".to_string());
+            args.push(format!("type=image,name={},push=true", name));
+        } else {
+            args.push("--output".to_string());
+            args.push(format!("type=image,name={}", name));
+        }
+    }
+    if let Some(ref dir) = output_dir {
+        args.push("--output".to_string());
+        args.push(format!("type=local,dest={}", dir.display()));
+    }
+}
+
+/// 追加 secret 参数到 args（排序以保证可复现）
+fn push_secret_args(args: &mut Vec<String>, secrets: &HashMap<String, String>) {
+    let mut keys: Vec<&String> = secrets.keys().collect();
+    keys.sort();
+    for key in keys {
+        args.push("--secret".to_string());
+        args.push(format!("id={},env={}", key, key));
+    }
 }
 
 /// BuildKit 客户端（buildctl CLI 封装）
@@ -128,27 +163,8 @@ impl BuildKitClient {
             args.push(format!("platform={}", request.platform));
         }
 
-        // 输出配置
-        if let Some(ref name) = request.image_name {
-            if request.push {
-                args.push("--output".to_string());
-                args.push(format!("type=image,name={},push=true", name));
-            } else {
-                args.push("--output".to_string());
-                args.push(format!("type=image,name={}", name));
-            }
-        }
-
-        if let Some(ref output_dir) = request.output_dir {
-            args.push("--output".to_string());
-            args.push(format!("type=local,dest={}", output_dir.display()));
-        }
-
-        // Secrets
-        for key in request.secrets.keys() {
-            args.push("--secret".to_string());
-            args.push(format!("id={},env={}", key, key));
-        }
+        push_output_args(&mut args, &request.image_name, request.push, &request.output_dir);
+        push_secret_args(&mut args, &request.secrets);
 
         // 缓存导入
         if let Some(ref cache_import) = request.cache_import {
@@ -164,6 +180,113 @@ impl BuildKitClient {
 
         args
     }
+
+    /// 通过 LLB Definition 执行构建（stdin 传入，无 --frontend）
+    #[cfg(feature = "llb")]
+    pub async fn build_from_llb(&self, request: &LlbBuildRequest) -> crate::Result<BuildOutput> {
+        let start = Instant::now();
+
+        // 序列化 Definition 为字节
+        let llb_bytes = request.definition.encode_to_vec();
+
+        // 组装命令行参数
+        let args = self.build_llb_args(request);
+
+        // 执行 buildctl，通过 stdin 传入 LLB
+        // stdout inherit 供进度输出；stderr piped 供错误捕获
+        let mut cmd = tokio::process::Command::new(&self.buildctl_path);
+        cmd.args(&args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::piped());
+
+        // 注入 secret 环境变量
+        for (key, value) in &request.secrets {
+            cmd.env(key, value);
+        }
+
+        let mut child = cmd.spawn()
+            .map_err(|e| ArcpackError::BuildFailed {
+                exit_code: -1,
+                stderr: format!("无法执行 buildctl: {}", e),
+            })?;
+
+        // 写入 LLB bytes 到 stdin，然后关闭（EOF）
+        if let Some(mut stdin) = child.stdin.take() {
+            use tokio::io::AsyncWriteExt;
+            stdin.write_all(&llb_bytes).await
+                .map_err(|e| ArcpackError::BuildFailed {
+                    exit_code: -1,
+                    stderr: format!("写入 LLB 到 stdin 失败: {}", e),
+                })?;
+            // drop stdin 发送 EOF
+        }
+
+        let output = child.wait_with_output().await
+            .map_err(|e| ArcpackError::BuildFailed {
+                exit_code: -1,
+                stderr: format!("等待 buildctl 完成失败: {}", e),
+            })?;
+
+        if !output.status.success() {
+            let exit_code = output.status.code().unwrap_or(-1);
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            return Err(ArcpackError::BuildFailed { exit_code, stderr });
+        }
+
+        Ok(BuildOutput {
+            image_digest: None,
+            duration: start.elapsed(),
+        })
+    }
+
+    /// 组装 LLB 构建的 buildctl 参数（纯函数，可独立测试）
+    ///
+    /// 关键区别：无 --frontend 参数，LLB 通过 stdin 传入
+    #[cfg(feature = "llb")]
+    fn build_llb_args(&self, request: &LlbBuildRequest) -> Vec<String> {
+        let mut args = vec![
+            "--addr".to_string(),
+            self.addr.clone(),
+            "build".to_string(),
+            "--local".to_string(),
+            format!("context={}", request.context_dir.display()),
+            "--progress".to_string(),
+            request.progress_mode.clone(),
+        ];
+
+        push_output_args(&mut args, &request.image_name, request.push, &request.output_dir);
+        push_secret_args(&mut args, &request.secrets);
+
+        // no-cache
+        if request.no_cache {
+            args.push("--no-cache".to_string());
+        }
+
+        args
+    }
+}
+
+/// LLB 构建请求
+#[cfg(feature = "llb")]
+#[derive(Debug)]
+pub struct LlbBuildRequest {
+    /// LLB Definition（protobuf）
+    pub definition: crate::buildkit::proto::pb::Definition,
+    /// 构建上下文目录
+    pub context_dir: PathBuf,
+    /// 输出镜像名
+    pub image_name: Option<String>,
+    /// 输出到本地目录
+    pub output_dir: Option<PathBuf>,
+    /// 是否推送到 registry
+    pub push: bool,
+    /// 进度模式：auto/plain/tty
+    pub progress_mode: String,
+    /// Secret 键值对
+    pub secrets: HashMap<String, String>,
+    /// 禁用缓存
+    pub no_cache: bool,
 }
 
 #[cfg(test)]
@@ -277,5 +400,95 @@ mod tests {
         // 验证每个 secret 都有对应的 --secret 参数
         let secret_count = args.iter().filter(|a| *a == "--secret").count();
         assert_eq!(secret_count, 2, "应有 2 个 --secret 参数");
+    }
+
+    // === LLB build_args 测试 ===
+
+    #[cfg(feature = "llb")]
+    mod llb_tests {
+        use super::*;
+
+        fn make_llb_request() -> LlbBuildRequest {
+            LlbBuildRequest {
+                definition: crate::buildkit::proto::pb::Definition::default(),
+                context_dir: PathBuf::from("/app"),
+                image_name: None,
+                output_dir: None,
+                push: false,
+                progress_mode: "auto".to_string(),
+                secrets: HashMap::new(),
+                no_cache: false,
+            }
+        }
+
+        #[test]
+        fn test_build_llb_args_basic() {
+            let client = BuildKitClient::new("unix:///tmp/buildkit.sock");
+            let req = make_llb_request();
+            let args = client.build_llb_args(&req);
+            assert!(args.contains(&"--addr".to_string()));
+            assert!(args.contains(&"unix:///tmp/buildkit.sock".to_string()));
+            assert!(args.contains(&"build".to_string()));
+            assert!(args.contains(&"context=/app".to_string()));
+            assert!(args.contains(&"--progress".to_string()));
+            assert!(args.contains(&"auto".to_string()));
+        }
+
+        #[test]
+        fn test_build_llb_args_no_frontend() {
+            let client = BuildKitClient::new("unix:///tmp/test.sock");
+            let req = make_llb_request();
+            let args = client.build_llb_args(&req);
+            assert!(
+                !args.contains(&"--frontend".to_string()),
+                "LLB 构建不应包含 --frontend 参数"
+            );
+            assert!(
+                !args.contains(&"dockerfile.v0".to_string()),
+                "LLB 构建不应包含 dockerfile.v0"
+            );
+        }
+
+        #[test]
+        fn test_build_llb_args_with_image_name() {
+            let client = BuildKitClient::new("unix:///tmp/test.sock");
+            let mut req = make_llb_request();
+            req.image_name = Some("myapp:latest".to_string());
+            let args = client.build_llb_args(&req);
+            assert!(args.contains(&"--output".to_string()));
+            assert!(args.contains(&"type=image,name=myapp:latest".to_string()));
+        }
+
+        #[test]
+        fn test_build_llb_args_with_push() {
+            let client = BuildKitClient::new("unix:///tmp/test.sock");
+            let mut req = make_llb_request();
+            req.image_name = Some("myapp:latest".to_string());
+            req.push = true;
+            let args = client.build_llb_args(&req);
+            assert!(args.contains(&"type=image,name=myapp:latest,push=true".to_string()));
+        }
+
+        #[test]
+        fn test_build_llb_args_with_secrets() {
+            let client = BuildKitClient::new("unix:///tmp/test.sock");
+            let mut req = make_llb_request();
+            req.secrets.insert("MY_SECRET".to_string(), "value".to_string());
+            let args = client.build_llb_args(&req);
+            assert!(args.contains(&"--secret".to_string()));
+            assert!(args.contains(&"id=MY_SECRET,env=MY_SECRET".to_string()));
+        }
+
+        #[test]
+        fn test_build_llb_args_with_no_cache() {
+            let client = BuildKitClient::new("unix:///tmp/test.sock");
+            let mut req = make_llb_request();
+            req.no_cache = true;
+            let args = client.build_llb_args(&req);
+            assert!(
+                args.contains(&"--no-cache".to_string()),
+                "no_cache=true 时应包含 --no-cache"
+            );
+        }
     }
 }
