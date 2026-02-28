@@ -4,16 +4,15 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use tonic::transport::Channel;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
+
+use buildkit_client::session::{SecretsServer, Session};
 
 use crate::buildkit::client::BuildOutput;
 use crate::buildkit::grpc::channel::create_channel;
 use crate::buildkit::grpc::progress::{
     parse_status_response, render_plain, ProgressMode,
 };
-use crate::buildkit::grpc::session::filesync::FilesyncProvider;
-use crate::buildkit::grpc::session::manager::SessionManager;
-use crate::buildkit::grpc::session::secrets::SecretsProvider;
 use crate::buildkit::grpc::solve::{self, ExportConfig, SolveConfig};
 use crate::buildkit::image::ImageConfig;
 use crate::buildkit::proto::control::control_client::ControlClient;
@@ -22,7 +21,8 @@ use crate::buildkit::proto::pb;
 
 /// gRPC 构建客户端——通过 tonic 直连 buildkitd
 ///
-/// 对齐 railpack `build.go:BuildWithBuildkitClient`
+/// Session 管理委托给 buildkit-client crate，
+/// Channel 创建保留本地实现（支持 Unix socket）。
 pub struct GrpcBuildKitClient {
     channel: Channel,
 }
@@ -33,8 +33,6 @@ pub struct GrpcBuildRequest {
     pub definition: pb::Definition,
     /// OCI Image 运行时配置
     pub image_config: ImageConfig,
-    /// 构建上下文目录
-    pub context_dir: PathBuf,
     /// 输出策略
     pub export: ExportConfig,
     /// Secret 键值对
@@ -47,6 +45,9 @@ pub struct GrpcBuildRequest {
 
 impl GrpcBuildKitClient {
     /// 创建 gRPC 客户端，连接 buildkitd
+    ///
+    /// 使用 arcpack 本地的 create_channel（支持 unix:// 和 tcp://），
+    /// 而非 buildkit-client 的 BuildKitClient::connect（仅支持 http://）。
     pub async fn new(addr: &str) -> Result<Self> {
         let channel = create_channel(addr)
             .await
@@ -61,29 +62,48 @@ impl GrpcBuildKitClient {
 
     /// 完整 gRPC 构建流程
     ///
-    /// 编排顺序（对齐 railpack `build.go:60-273`）：
-    /// 1. SessionManager 注册 filesync + secrets provider
-    /// 2. 启动 Session 后台 task（bidi stream）
-    /// 3. 构造 SolveConfig（definition + exporter + session_id + frontend_attrs）
+    /// 编排顺序：
+    /// 1. 创建 buildkit-client Session，注册 filesync + secrets
+    /// 2. 启动 Session（bidi stream + H2 tunnel）
+    /// 3. 构造 SolveRequest（definition + exporter + session_id + frontend_attrs）
     /// 4. 启动进度监听后台 task（Status stream）
-    /// 5. 发送 Solve RPC
-    /// 6. 等待进度完成 + 停止 Session
+    /// 5. 发送 Solve RPC（注入 session metadata）
+    /// 6. 清理后台 task
     /// 7. 返回 BuildOutput
     pub async fn build(&self, request: GrpcBuildRequest) -> Result<BuildOutput> {
         let start = Instant::now();
 
-        // 1. 创建 Session Manager，注册 providers
-        let session = SessionManager::new()
-            .with_filesync(FilesyncProvider::new(request.local_dirs))
-            .with_secrets(SecretsProvider::new(request.secrets));
+        // 1. 创建 buildkit-client Session
+        let mut session = Session::new();
 
-        let session_id = session.session_id().to_string();
+        // 注册 filesync：使用 local_dirs["context"] 作为构建上下文
+        // buildkit-client 的 FileSyncServer 只接受单个目录
+        if let Some(path) = request.local_dirs.get("context") {
+            let abs_path = std::fs::canonicalize(path)
+                .with_context(|| format!("无法解析路径: {}", path.display()))?;
+            session.add_file_sync(abs_path).await;
+        }
+
+        // 注册 secrets
+        if !request.secrets.is_empty() {
+            let secrets = SecretsServer::from_map(request.secrets.clone())
+                .map_err(|e| anyhow::anyhow!("创建 secrets 失败: {e}"))?;
+            session.add_secrets(secrets).await;
+        }
+
+        let session_id = session.get_id();
         debug!(session_id = %session_id, "session created");
 
-        // 2. 启动 Session 后台 task
-        let session_handle = session.run(self.channel.clone());
+        // 2. 启动 Session（连接到 Control.Session() bidi stream）
+        let control_for_session = ControlClient::new(self.channel.clone());
+        session
+            .start(control_for_session)
+            .await
+            .map_err(|e| anyhow::anyhow!("启动 session 失败: {e}"))?;
 
-        // 3. 构造 SolveRequest（只构造一次，保证 ref 一致性）
+        info!(session_id = %session_id, "session started");
+
+        // 3. 构造 SolveRequest
         let frontend_attrs = build_frontend_attrs(&request.image_config)?;
         let config = SolveConfig {
             definition: request.definition,
@@ -94,7 +114,7 @@ impl GrpcBuildKitClient {
         let solve_request = solve::build_solve_request(&config)?;
         let progress_ref = solve_request.r#ref.clone();
 
-        // 4. 先建立进度订阅（消除竞态：stream 在 Solve 之前就绑定到 ref）
+        // 4. 启动进度监听（在 Solve 之前绑定到 ref，消除竞态）
         let progress_mode = request.progress_mode;
         let progress_handle = {
             let mut status_client = ControlClient::new(self.channel.clone());
@@ -112,13 +132,10 @@ impl GrpcBuildKitClient {
                                 Ok(status_resp) => {
                                     let events =
                                         parse_status_response(&status_resp);
-                                    for event in &events {
-                                        match progress_mode {
-                                            ProgressMode::Quiet => {}
-                                            _ => {
-                                                let line = render_plain(event);
-                                                info!("{line}");
-                                            }
+                                    if !matches!(progress_mode, ProgressMode::Quiet) {
+                                        for event in &events {
+                                            let line = render_plain(event);
+                                            info!("{line}");
                                         }
                                     }
                                 }
@@ -138,17 +155,22 @@ impl GrpcBuildKitClient {
                 }
                 Err(status) => {
                     debug!(error = %status, "failed to subscribe to progress");
-                    // 订阅失败时 spawn 空 task，保持类型一致
                     tokio::spawn(async {})
                 }
             }
         };
 
-        // 5. 发送 Solve RPC（Status stream 已就绪）
-        let mut client = ControlClient::new(self.channel.clone());
-        let solve_result = solve::solve(&mut client, solve_request).await;
+        // 5. 构造带 session metadata 的 Solve 请求
+        let mut grpc_request = tonic::Request::new(solve_request);
+        inject_session_metadata(grpc_request.metadata_mut(), &session);
 
-        // 6. 无论成功失败，都清理后台 task
+        let mut client = ControlClient::new(self.channel.clone());
+        let solve_result = client
+            .solve(grpc_request)
+            .await
+            .context("Solve RPC failed");
+
+        // 6. 清理后台 task
         if progress_handle.is_finished() {
             if let Err(e) = progress_handle.await {
                 debug!(error = %e, "progress task ended abnormally");
@@ -158,25 +180,13 @@ impl GrpcBuildKitClient {
             debug!("progress task aborted (normal cleanup)");
         }
 
-        // 检查 session 状态：已结束则收集错误，否则 abort
-        if session_handle.is_finished() {
-            match session_handle.await {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => {
-                    warn!(error = %e, "session ended with error");
-                }
-                Err(join_err) => {
-                    warn!(error = %join_err, "session task panicked or was cancelled");
-                }
-            }
-        } else {
-            session_handle.abort();
-        }
+        // 显式释放 session，确保 bidi stream 和 H2 tunnel 后台 task 在返回前关闭
+        drop(session);
 
-        let result = solve_result.context("build failed")?;
+        let response = solve_result?;
+        let exporter_response = response.into_inner().exporter_response;
 
-        let image_digest = result
-            .exporter_response
+        let image_digest = exporter_response
             .get("containerimage.digest")
             .cloned();
 
@@ -190,6 +200,42 @@ impl GrpcBuildKitClient {
             image_digest,
             duration: start.elapsed(),
         })
+    }
+}
+
+/// 向 Solve 请求注入 session metadata
+///
+/// buildkit-client 的 Session::metadata() 返回 session 头信息，
+/// 需要附加到 Solve RPC 的 metadata 中让 buildkitd 关联 session。
+fn inject_session_metadata(
+    metadata: &mut tonic::metadata::MetadataMap,
+    session: &Session,
+) {
+    for (key, values) in session.metadata() {
+        let k = match key
+            .parse::<tonic::metadata::MetadataKey<tonic::metadata::Ascii>>()
+        {
+            Ok(k) => k,
+            Err(e) => {
+                debug!(key = %key, error = %e, "skipping unparseable metadata key");
+                continue;
+            }
+        };
+        for value in values {
+            match value
+                .parse::<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>()
+            {
+                Ok(v) => {
+                    metadata.append(k.clone(), v);
+                }
+                Err(e) => {
+                    debug!(
+                        key = %key, value = %value, error = %e,
+                        "skipping unparseable metadata value"
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -216,58 +262,23 @@ fn serialize_image_config(config: &ImageConfig) -> Result<String> {
     let mut oci_config = serde_json::Map::new();
 
     if !config.env.is_empty() {
-        oci_config.insert(
-            "Env".to_string(),
-            serde_json::Value::Array(
-                config
-                    .env
-                    .iter()
-                    .map(|e| serde_json::Value::String(e.clone()))
-                    .collect(),
-            ),
-        );
+        oci_config.insert("Env".into(), serde_json::to_value(&config.env)?);
     }
 
     if !config.working_dir.is_empty() {
-        oci_config.insert(
-            "WorkingDir".to_string(),
-            serde_json::Value::String(config.working_dir.clone()),
-        );
+        oci_config.insert("WorkingDir".into(), config.working_dir.clone().into());
     }
 
     if !config.entrypoint.is_empty() {
-        oci_config.insert(
-            "Entrypoint".to_string(),
-            serde_json::Value::Array(
-                config
-                    .entrypoint
-                    .iter()
-                    .map(|e| serde_json::Value::String(e.clone()))
-                    .collect(),
-            ),
-        );
+        oci_config.insert("Entrypoint".into(), serde_json::to_value(&config.entrypoint)?);
     }
 
     if !config.cmd.is_empty() {
-        oci_config.insert(
-            "Cmd".to_string(),
-            serde_json::Value::Array(
-                config
-                    .cmd
-                    .iter()
-                    .map(|c| serde_json::Value::String(c.clone()))
-                    .collect(),
-            ),
-        );
+        oci_config.insert("Cmd".into(), serde_json::to_value(&config.cmd)?);
     }
 
     // 包裹在 { "config": { ... } } 中
-    let mut root = serde_json::Map::new();
-    root.insert(
-        "config".to_string(),
-        serde_json::Value::Object(oci_config),
-    );
-
+    let root = serde_json::json!({ "config": oci_config });
     serde_json::to_string(&root).context("failed to serialize image config")
 }
 
