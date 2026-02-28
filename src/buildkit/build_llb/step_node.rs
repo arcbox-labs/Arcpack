@@ -1,8 +1,6 @@
 use crate::graph::Node;
 use crate::plan::Step;
 use super::build_env::BuildEnvironment;
-
-#[cfg(feature = "llb")]
 use crate::buildkit::llb::OperationOutput;
 
 /// 构建图节点 —— Step + 处理状态 + 双环境
@@ -23,7 +21,6 @@ pub struct StepNode {
     /// 本步骤处理后的累积环境
     pub output_env: BuildEnvironment,
     /// LLB 状态（Phase B）
-    #[cfg(feature = "llb")]
     pub llb_state: Option<OperationOutput>,
 }
 
@@ -37,19 +34,16 @@ impl StepNode {
             in_progress: false,
             input_env: BuildEnvironment::new(),
             output_env: BuildEnvironment::new(),
-            #[cfg(feature = "llb")]
             llb_state: None,
         }
     }
 
     /// 设置 LLB 状态
-    #[cfg(feature = "llb")]
     pub fn set_llb_state(&mut self, state: OperationOutput) {
         self.llb_state = Some(state);
     }
 
     /// 获取 LLB 状态引用
-    #[cfg(feature = "llb")]
     pub fn get_llb_state(&self) -> Option<&OperationOutput> {
         self.llb_state.as_ref()
     }
@@ -89,7 +83,6 @@ mod tests {
         assert_eq!(node.name(), "", "step with no name should return empty string");
     }
 
-    #[cfg(feature = "llb")]
     #[test]
     fn test_llb_state_initial_none() {
         let step = Step::new("install");
@@ -97,7 +90,6 @@ mod tests {
         assert!(node.llb_state.is_none(), "新建 StepNode 的 llb_state 应为 None");
     }
 
-    #[cfg(feature = "llb")]
     #[test]
     fn test_set_get_llb_state_roundtrip() {
         use crate::buildkit::llb::source::image;

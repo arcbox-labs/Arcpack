@@ -142,6 +142,10 @@ pub fn generate_build_plan(
     provider_to_use.initialize(&mut ctx)?;
     provider_to_use.plan(&mut ctx)?;
 
+    // Procfile 后处理：覆盖 start_cmd（如果 Procfile 存在）
+    let procfile_provider = provider::procfile::ProcfileProvider::new();
+    procfile_provider.plan(&mut ctx)?;
+
     // 生成构建计划
     let (mut plan, resolved_packages) = ctx.generate()?;
 

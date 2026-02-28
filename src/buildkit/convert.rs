@@ -3,8 +3,6 @@ use super::build_llb::BuildGraph;
 use super::image::{build_image_config, ImageConfig};
 use super::platform::Platform;
 use crate::plan::BuildPlan;
-
-#[cfg(feature = "llb")]
 use crate::buildkit::proto::pb;
 
 /// 转换选项
@@ -51,7 +49,6 @@ pub fn convert_plan_to_dockerfile(
 }
 
 /// LLB 转换结果
-#[cfg(feature = "llb")]
 #[derive(Debug)]
 pub struct LlbConvertResult {
     pub definition: pb::Definition,
@@ -61,7 +58,6 @@ pub struct LlbConvertResult {
 /// 将 BuildPlan 转换为 LLB Definition + ImageConfig
 ///
 /// 对齐 railpack `ConvertPlanToLLB()`（Phase B 版本）
-#[cfg(feature = "llb")]
 pub fn convert_plan_to_llb(
     plan: &BuildPlan,
     opts: &ConvertPlanOptions,
@@ -210,7 +206,6 @@ mod tests {
 
     // === LLB 转换测试 ===
 
-    #[cfg(feature = "llb")]
     mod llb_tests {
         use super::*;
 

@@ -1,0 +1,138 @@
+---
+source: tests/snapshot_tests.rs
+expression: plan
+---
+{
+  "steps": [
+    {
+      "name": "packages:mise",
+      "inputs": [
+        {
+          "image": "ghcr.io/railwayapp/railpack-builder:latest"
+        }
+      ],
+      "commands": [
+        {
+          "path": "/mise/shims"
+        },
+        {
+          "path": "/etc/mise/config.toml",
+          "name": "mise.toml",
+          "customName": "create mise config"
+        },
+        {
+          "cmd": "mise install",
+          "customName": "install mise packages: python"
+        }
+      ],
+      "assets": {
+        "mise.toml": "[tools.python]\nversion = \"3.13.0.0\"\n"
+      },
+      "variables": {
+        "MISE_CACHE_DIR": "/mise/cache",
+        "MISE_CONFIG_DIR": "/mise",
+        "MISE_DATA_DIR": "/mise",
+        "MISE_IDIOMATIC_VERSION_FILE_ENABLE_TOOLS": "python,node,ruby,elixir,go,java,yarn",
+        "MISE_INSTALLS_DIR": "/mise/installs",
+        "MISE_NODE_VERIFY": "false",
+        "MISE_PARANOID": "1",
+        "MISE_PYTHON_COMPILE": "false",
+        "MISE_SHIMS_DIR": "/mise/shims",
+        "MISE_TRUSTED_CONFIG_PATHS": "/app"
+      }
+    },
+    {
+      "name": "install",
+      "inputs": [
+        {
+          "step": "packages:mise"
+        }
+      ],
+      "commands": [
+        {
+          "path": "/app/.venv/bin"
+        },
+        {
+          "src": "requirements.txt",
+          "dest": "requirements.txt"
+        },
+        {
+          "cmd": "python -m venv /app/.venv"
+        },
+        {
+          "cmd": "pip install -r requirements.txt"
+        }
+      ],
+      "variables": {
+        "VIRTUAL_ENV": "/app/.venv"
+      },
+      "caches": [
+        "pip"
+      ]
+    },
+    {
+      "name": "build",
+      "inputs": [
+        {
+          "step": "install"
+        },
+        {
+          "include": [
+            "."
+          ],
+          "local": true
+        }
+      ],
+      "secrets": [
+        "*"
+      ]
+    }
+  ],
+  "caches": {
+    "pip": {
+      "directory": "/opt/pip-cache",
+      "type": "shared"
+    }
+  },
+  "deploy": {
+    "base": {
+      "image": "ghcr.io/railwayapp/railpack-runtime:latest"
+    },
+    "inputs": [
+      {
+        "include": [
+          "/mise/shims",
+          "/mise/installs",
+          "/usr/local/bin/mise",
+          "/etc/mise/config.toml",
+          "/root/.local/state/mise"
+        ],
+        "step": "packages:mise"
+      },
+      {
+        "include": [
+          ".venv"
+        ],
+        "step": "build"
+      },
+      {
+        "exclude": [
+          ".venv"
+        ],
+        "include": [
+          "."
+        ],
+        "step": "build"
+      }
+    ],
+    "startCommand": "python manage.py migrate && gunicorn --bind 0.0.0.0:${PORT:-8000} myproject.wsgi:application",
+    "variables": {
+      "PIP_DEFAULT_TIMEOUT": "100",
+      "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONFAULTHANDLER": "1",
+      "PYTHONHASHSEED": "random",
+      "PYTHONUNBUFFERED": "1"
+    }
+  }
+}

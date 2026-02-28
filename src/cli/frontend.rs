@@ -19,10 +19,38 @@ use tonic::transport::Channel;
 use crate::buildkit::grpc::channel::create_channel;
 use crate::buildkit::image::ImageConfig;
 use crate::buildkit::proto::{gateway, pb};
+use crate::plan::BuildPlan;
 
 /// Frontend 命令参数（无用户参数——所有配置通过 buildkitd 的 frontend opts 传入）
 #[derive(Debug, clap::Args)]
 pub struct FrontendArgs {}
+
+/// 从环境变量解析 frontend options
+///
+/// buildkitd 启动 frontend 时，将 `--opt key=value` 编码为
+/// `BUILDKIT_FRONTEND_OPT_key=value` 环境变量。
+/// 对齐 Go `grpcclient.opts()`
+fn parse_frontend_opts() -> HashMap<String, String> {
+    std::env::vars()
+        .filter_map(|(k, v)| {
+            k.strip_prefix("BUILDKIT_FRONTEND_OPT_")
+                .map(|key| (key.to_string(), v))
+        })
+        .collect()
+}
+
+/// 从 frontend opts 提取 build-arg 参数
+///
+/// 对齐 railpack `parseBuildArgs()`：
+/// `build-arg:secrets-hash=xxx` → `{"secrets-hash": "xxx"}`
+fn parse_build_args(opts: &HashMap<String, String>) -> HashMap<String, String> {
+    opts.iter()
+        .filter_map(|(k, v)| {
+            k.strip_prefix("build-arg:")
+                .map(|name| (name.to_string(), v.clone()))
+        })
+        .collect()
+}
 
 /// Gateway 客户端 —— 与 buildkitd LLBBridge 服务通信
 ///
@@ -143,26 +171,53 @@ impl GatewayClient {
     /// 发送一个空 Definition 的 Solve 请求，buildkitd 会返回包含上下文文件的引用。
     /// 此引用可用于后续的 ReadFile/ReadDir 调用。
     pub async fn solve_context(&mut self) -> crate::Result<String> {
-        // 构造 local://context source op 的 Definition
+        self.solve_local_source("local://context", HashMap::new(), "load build context")
+            .await
+    }
+
+    /// 通过 dockerfile mount 获取 plan 文件引用
+    ///
+    /// 对齐 railpack `readFile()` 中 `llb.Local("dockerfile", followPaths)` + Solve 的模式。
+    /// `local://dockerfile` 是 BuildKit 约定的 config 文件 mount 名称。
+    async fn solve_plan_mount(&mut self, filename: &str) -> crate::Result<String> {
+        let attrs = HashMap::from([(
+            "local.followpaths".to_string(),
+            serde_json::to_string(&[filename]).unwrap_or_default(),
+        )]);
+        self.solve_local_source(
+            "local://dockerfile",
+            attrs,
+            &format!("load build definition from {filename}"),
+        )
+        .await
+    }
+
+    /// 构造 local source Definition → Solve → 返回 ref ID
+    ///
+    /// `solve_context()` 和 `solve_plan_mount()` 的共享实现。
+    async fn solve_local_source(
+        &mut self,
+        identifier: &str,
+        attrs: HashMap<String, String>,
+        description: &str,
+    ) -> crate::Result<String> {
         use prost::Message;
+
         let source_op = pb::Op {
             inputs: vec![],
             op: Some(pb::op::Op::Source(pb::SourceOp {
-                identifier: "local://context".to_string(),
-                attrs: HashMap::new(),
+                identifier: identifier.to_string(),
+                attrs,
             })),
             platform: None,
             constraints: None,
         };
         let source_bytes = source_op.encode_to_vec();
+        let source_digest = format!("sha256:{}", sha2_digest(&source_bytes));
 
-        // terminal op 引用 source op
         let terminal = pb::Op {
             inputs: vec![pb::Input {
-                digest: format!(
-                    "sha256:{}",
-                    sha2_digest(&source_bytes)
-                ),
+                digest: source_digest.clone(),
                 index: 0,
             }],
             op: None,
@@ -172,21 +227,17 @@ impl GatewayClient {
         let terminal_bytes = terminal.encode_to_vec();
 
         let definition = pb::Definition {
-            def: vec![source_bytes.clone(), terminal_bytes],
-            metadata: {
-                let mut m = HashMap::new();
-                m.insert(
-                    format!("sha256:{}", sha2_digest(&source_bytes)),
-                    pb::OpMetadata {
-                        description: HashMap::from([(
-                            "llb.customname".to_string(),
-                            "load build context".to_string(),
-                        )]),
-                        ..Default::default()
-                    },
-                );
-                m
-            },
+            def: vec![source_bytes, terminal_bytes],
+            metadata: HashMap::from([(
+                source_digest,
+                pb::OpMetadata {
+                    description: HashMap::from([(
+                        "llb.customname".to_string(),
+                        description.to_string(),
+                    )]),
+                    ..Default::default()
+                },
+            )]),
             source: None,
         };
 
@@ -206,22 +257,31 @@ impl GatewayClient {
                 source_policies: vec![],
             })
             .await
-            .map_err(|e| anyhow::anyhow!("gateway Solve (context) failed: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("gateway Solve ({identifier}) failed: {e}"))?;
 
-        // 从响应中提取引用 ID
         let result = resp
             .into_inner()
             .result
-            .ok_or_else(|| anyhow::anyhow!("gateway Solve returned no result"))?;
+            .ok_or_else(|| anyhow::anyhow!("gateway Solve ({identifier}) returned no result"))?;
 
         match result.result {
             Some(gateway::result::Result::Ref(r)) => Ok(r.id),
             Some(gateway::result::Result::RefDeprecated(id)) => Ok(id),
-            _ => Err(anyhow::anyhow!(
-                "gateway Solve returned unexpected result type"
-            )
-            .into()),
+            _ => Err(
+                anyhow::anyhow!("gateway Solve returned unexpected result type").into(),
+            ),
         }
+    }
+
+    /// 从 dockerfile mount 读取并反序列化 plan 文件
+    ///
+    /// 对齐 railpack `readRailpackPlan()`
+    pub async fn read_plan_file(&mut self, filename: &str) -> crate::Result<BuildPlan> {
+        let ref_id = self.solve_plan_mount(filename).await?;
+        let data = self.read_file(&ref_id, filename).await?;
+        let plan: BuildPlan = serde_json::from_slice(&data)
+            .map_err(|e| anyhow::anyhow!("解析 plan 文件 '{filename}' 失败: {e}"))?;
+        Ok(plan)
     }
 
     /// 将构建上下文同步到本地临时目录
@@ -362,41 +422,68 @@ async fn run_frontend_async() -> crate::Result<bool> {
     let _pong = gateway.ping().await?;
     tracing::info!("gateway ping 成功");
 
-    // 3. Solve 获取构建上下文引用
-    let context_ref = gateway.solve_context().await?;
-    tracing::info!(context_ref = %context_ref, "获取构建上下文引用");
+    // 3. 解析 frontend options（来自 BUILDKIT_FRONTEND_OPT_* 环境变量）
+    let frontend_opts = parse_frontend_opts();
+    let build_args = parse_build_args(&frontend_opts);
+    tracing::debug!(?frontend_opts, ?build_args, "解析 frontend options");
 
-    // 4. 同步上下文到临时目录
-    let temp_dir = tempfile::tempdir()
-        .map_err(|e| anyhow::anyhow!("创建临时目录失败: {e}"))?;
-    gateway
-        .sync_context_to_dir(&context_ref, temp_dir.path())
-        .await?;
-    tracing::info!(path = %temp_dir.path().display(), "构建上下文已同步");
+    // 4. 根据 filename option 选择路径
+    let plan = if frontend_opts.contains_key("filename") {
+        // Plan-file 路径（对齐 railpack）
+        let filename = frontend_opts
+            .get("filename")
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str())
+            .unwrap_or("arcpack-plan.json");
+        tracing::info!(filename, "从 dockerfile mount 读取 plan 文件");
+        gateway.read_plan_file(filename).await?
+    } else {
+        // 检测路径（向后兼容）
+        tracing::info!("未指定 filename，使用检测流水线");
+        let context_ref = gateway.solve_context().await?;
+        tracing::info!(context_ref = %context_ref, "获取构建上下文引用");
 
-    // 5. 执行标准检测 → BuildPlan 流水线
-    let source = temp_dir
-        .path()
-        .to_str()
-        .ok_or_else(|| anyhow::anyhow!("临时目录路径含非 UTF-8 字符"))?;
+        let temp_dir = tempfile::tempdir()
+            .map_err(|e| anyhow::anyhow!("创建临时目录失败: {e}"))?;
+        gateway
+            .sync_context_to_dir(&context_ref, temp_dir.path())
+            .await?;
+        tracing::info!(path = %temp_dir.path().display(), "构建上下文已同步");
 
-    let result = crate::generate_build_plan(
-        source,
-        HashMap::new(),
-        &crate::GenerateBuildPlanOptions::default(),
-    )?;
+        let source = temp_dir
+            .path()
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("临时目录路径含非 UTF-8 字符"))?;
 
-    let plan = result
-        .plan
-        .ok_or_else(|| anyhow::anyhow!("构建计划生成失败"))?;
+        let result = crate::generate_build_plan(
+            source,
+            HashMap::new(),
+            &crate::GenerateBuildPlanOptions::default(),
+        )?;
+
+        result
+            .plan
+            .ok_or_else(|| anyhow::anyhow!("构建计划生成失败"))?
+    };
+
+    // 5. 从 build-args 构建转换选项
+    let platform_str = build_args
+        .get("platform")
+        .or_else(|| frontend_opts.get("platform"))
+        .map(|s| s.as_str())
+        .unwrap_or("");
+    let platform = parse_platform_with_defaults(platform_str)?;
+
+    let opts = ConvertPlanOptions {
+        secrets_hash: build_args.get("secrets-hash").cloned(),
+        platform,
+        cache_key: build_args
+            .get("cache-key")
+            .cloned()
+            .unwrap_or_default(),
+    };
 
     // 6. 转换为 LLB
-    let platform = parse_platform_with_defaults("")?;
-    let opts = ConvertPlanOptions {
-        secrets_hash: None,
-        platform,
-        cache_key: String::new(),
-    };
     let llb_result = convert_plan_to_llb(&plan, &opts)?;
 
     // 7. 返回结果给 buildkitd
@@ -506,6 +593,74 @@ mod tests {
         // foo..bar 不含 ParentDir 组件，应被接受
         let result = validate_entry_path("foo..bar");
         assert!(result.is_ok(), "foo..bar 应被接受: {:?}", result.err());
+    }
+
+    #[test]
+    #[serial]
+    fn test_parse_frontend_opts_reads_env() {
+        // 保存原有的 BUILDKIT_FRONTEND_OPT_* 环境变量
+        let original: Vec<_> = std::env::vars()
+            .filter(|(k, _)| k.starts_with("BUILDKIT_FRONTEND_OPT_"))
+            .collect();
+        for (k, _) in &original {
+            unsafe { std::env::remove_var(k) };
+        }
+
+        unsafe {
+            std::env::set_var("BUILDKIT_FRONTEND_OPT_filename", "plan.json");
+            std::env::set_var("BUILDKIT_FRONTEND_OPT_platform", "linux/arm64");
+            std::env::set_var("BUILDKIT_FRONTEND_OPT_build-arg:cache-key", "mykey");
+        }
+
+        let opts = parse_frontend_opts();
+
+        // 清理测试变量
+        unsafe {
+            std::env::remove_var("BUILDKIT_FRONTEND_OPT_filename");
+            std::env::remove_var("BUILDKIT_FRONTEND_OPT_platform");
+            std::env::remove_var("BUILDKIT_FRONTEND_OPT_build-arg:cache-key");
+        }
+        // 恢复原值
+        for (k, v) in &original {
+            unsafe { std::env::set_var(k, v) };
+        }
+
+        assert_eq!(opts.get("filename").map(String::as_str), Some("plan.json"));
+        assert_eq!(
+            opts.get("platform").map(String::as_str),
+            Some("linux/arm64")
+        );
+        assert_eq!(
+            opts.get("build-arg:cache-key").map(String::as_str),
+            Some("mykey")
+        );
+    }
+
+    #[test]
+    fn test_parse_build_args_extracts_prefix() {
+        let opts = HashMap::from([
+            ("build-arg:secrets-hash".to_string(), "abc123".to_string()),
+            ("build-arg:cache-key".to_string(), "mykey".to_string()),
+            ("platform".to_string(), "linux/amd64".to_string()),
+            ("filename".to_string(), "plan.json".to_string()),
+        ]);
+        let args = parse_build_args(&opts);
+        assert_eq!(args.len(), 2);
+        assert_eq!(
+            args.get("secrets-hash").map(String::as_str),
+            Some("abc123")
+        );
+        assert_eq!(args.get("cache-key").map(String::as_str), Some("mykey"));
+    }
+
+    #[test]
+    fn test_parse_build_args_empty_when_no_prefix() {
+        let opts = HashMap::from([
+            ("platform".to_string(), "linux/amd64".to_string()),
+            ("filename".to_string(), "plan.json".to_string()),
+        ]);
+        let args = parse_build_args(&opts);
+        assert!(args.is_empty());
     }
 
     #[test]

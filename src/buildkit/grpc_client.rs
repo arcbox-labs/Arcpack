@@ -8,7 +8,7 @@ use tracing::{debug, info};
 
 use buildkit_client::session::{SecretsServer, Session};
 
-use crate::buildkit::client::BuildOutput;
+use crate::buildkit::BuildOutput;
 use crate::buildkit::grpc::channel::create_channel;
 use crate::buildkit::grpc::progress::{
     parse_status_response, render_plain, ProgressMode,

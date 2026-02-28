@@ -1,0 +1,178 @@
+---
+source: tests/snapshot_tests.rs
+expression: plan
+---
+{
+  "steps": [
+    {
+      "name": "packages:apt:build",
+      "inputs": [
+        {
+          "image": "ghcr.io/railwayapp/railpack-builder:latest"
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "sh -c 'apt-get update && apt-get install -y libffi-dev libjemalloc-dev libyaml-dev zlib1g-dev'",
+          "customName": "install apt packages: libffi-dev libjemalloc-dev libyaml-dev zlib1g-dev"
+        }
+      ],
+      "caches": [
+        "apt",
+        "apt-lists"
+      ]
+    },
+    {
+      "name": "packages:mise",
+      "inputs": [
+        {
+          "step": "packages:apt:build"
+        }
+      ],
+      "commands": [
+        {
+          "path": "/mise/shims"
+        },
+        {
+          "path": "/etc/mise/config.toml",
+          "name": "mise.toml",
+          "customName": "create mise config"
+        },
+        {
+          "cmd": "mise install",
+          "customName": "install mise packages: ruby"
+        }
+      ],
+      "assets": {
+        "mise.toml": "[tools.ruby]\nversion = \"3.3.0.0.0\"\n"
+      },
+      "variables": {
+        "MISE_CACHE_DIR": "/mise/cache",
+        "MISE_CONFIG_DIR": "/mise",
+        "MISE_DATA_DIR": "/mise",
+        "MISE_IDIOMATIC_VERSION_FILE_ENABLE_TOOLS": "python,node,ruby,elixir,go,java,yarn",
+        "MISE_INSTALLS_DIR": "/mise/installs",
+        "MISE_NODE_VERIFY": "false",
+        "MISE_PARANOID": "1",
+        "MISE_SHIMS_DIR": "/mise/shims",
+        "MISE_TRUSTED_CONFIG_PATHS": "/app"
+      }
+    },
+    {
+      "name": "install",
+      "inputs": [
+        {
+          "step": "packages:mise"
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "gem install bundler:2.5.6"
+        },
+        {
+          "src": "Gemfile",
+          "dest": "Gemfile"
+        },
+        {
+          "src": "Gemfile.lock",
+          "dest": "Gemfile.lock"
+        },
+        {
+          "cmd": "bundle install --jobs=4 --retry=3 --without development test"
+        }
+      ],
+      "secrets": [
+        "*"
+      ],
+      "caches": [
+        "bundle-cache"
+      ]
+    },
+    {
+      "name": "build",
+      "inputs": [
+        {
+          "step": "install"
+        },
+        {
+          "include": [
+            "."
+          ],
+          "local": true
+        }
+      ],
+      "secrets": [
+        "*"
+      ]
+    },
+    {
+      "name": "packages:apt:runtime",
+      "inputs": [
+        {
+          "image": "ghcr.io/railwayapp/railpack-runtime:latest"
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "sh -c 'apt-get update && apt-get install -y libjemalloc2 libyaml-0-2'",
+          "customName": "install apt packages: libjemalloc2 libyaml-0-2"
+        }
+      ],
+      "caches": [
+        "apt",
+        "apt-lists"
+      ]
+    }
+  ],
+  "caches": {
+    "apt": {
+      "directory": "/var/cache/apt",
+      "type": "locked"
+    },
+    "apt-lists": {
+      "directory": "/var/lib/apt/lists",
+      "type": "locked"
+    },
+    "bundle-cache": {
+      "directory": "/usr/local/bundle/cache",
+      "type": "shared"
+    }
+  },
+  "deploy": {
+    "base": {
+      "step": "packages:apt:runtime"
+    },
+    "inputs": [
+      {
+        "include": [
+          "/mise/shims",
+          "/mise/installs",
+          "/usr/local/bin/mise",
+          "/etc/mise/config.toml",
+          "/root/.local/state/mise"
+        ],
+        "step": "packages:mise"
+      },
+      {
+        "include": [
+          "."
+        ],
+        "step": "build"
+      }
+    ],
+    "startCommand": "bundle exec rackup -o 0.0.0.0 -p ${PORT:-3000}",
+    "variables": {
+      "BUNDLE_GEMFILE": "/app/Gemfile",
+      "GEM_HOME": "/usr/local/bundle",
+      "GEM_PATH": "/usr/local/bundle",
+      "LD_PRELOAD": "libjemalloc.so",
+      "MALLOC_ARENA_MAX": "2",
+      "RAILS_ENV": "production",
+      "RAILS_LOG_TO_STDOUT": "enabled",
+      "RAILS_SERVE_STATIC_FILES": "true"
+    },
+    "paths": [
+      "/usr/local/bundle/bin"
+    ]
+  }
+}

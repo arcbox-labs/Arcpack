@@ -1,0 +1,6 @@
+{
+  "name": "test-procfile",
+  "scripts": {
+    "start": "node index.js"
+  }
+}

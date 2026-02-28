@@ -1,0 +1,178 @@
+---
+source: tests/snapshot_tests.rs
+expression: plan
+---
+{
+  "steps": [
+    {
+      "name": "packages:apt:build",
+      "inputs": [
+        {
+          "image": "ghcr.io/railwayapp/railpack-builder:latest"
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "sh -c 'apt-get update && apt-get install -y build-essential'",
+          "customName": "install apt packages: build-essential"
+        }
+      ],
+      "caches": [
+        "apt",
+        "apt-lists"
+      ]
+    },
+    {
+      "name": "packages:mise",
+      "inputs": [
+        {
+          "step": "packages:apt:build"
+        }
+      ],
+      "commands": [
+        {
+          "path": "/mise/shims"
+        },
+        {
+          "path": "/etc/mise/config.toml",
+          "name": "mise.toml",
+          "customName": "create mise config"
+        },
+        {
+          "cmd": "mise install",
+          "customName": "install mise packages: elixir, erlang"
+        }
+      ],
+      "assets": {
+        "mise.toml": "[tools.elixir]\nversion = \"1.17.0.0\"\n\n[tools.erlang]\nversion = \"27.0.0\"\n"
+      },
+      "variables": {
+        "MISE_CACHE_DIR": "/mise/cache",
+        "MISE_CONFIG_DIR": "/mise",
+        "MISE_DATA_DIR": "/mise",
+        "MISE_IDIOMATIC_VERSION_FILE_ENABLE_TOOLS": "python,node,ruby,elixir,go,java,yarn",
+        "MISE_INSTALLS_DIR": "/mise/installs",
+        "MISE_NODE_VERIFY": "false",
+        "MISE_PARANOID": "1",
+        "MISE_SHIMS_DIR": "/mise/shims",
+        "MISE_TRUSTED_CONFIG_PATHS": "/app"
+      }
+    },
+    {
+      "name": "install",
+      "inputs": [
+        {
+          "step": "packages:mise"
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "mix local.hex --force"
+        },
+        {
+          "cmd": "mix local.rebar --force"
+        },
+        {
+          "src": "mix.exs",
+          "dest": "mix.exs"
+        },
+        {
+          "cmd": "mix deps.get --only prod"
+        },
+        {
+          "cmd": "mix deps.compile"
+        }
+      ],
+      "secrets": [
+        "*"
+      ],
+      "variables": {
+        "MIX_ENV": "prod",
+        "MIX_HOME": "/root/.mix"
+      },
+      "caches": [
+        "mix-deps"
+      ]
+    },
+    {
+      "name": "build",
+      "inputs": [
+        {
+          "step": "install"
+        },
+        {
+          "include": [
+            "."
+          ],
+          "local": true
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "mix compile"
+        },
+        {
+          "cmd": "mix release"
+        }
+      ],
+      "secrets": [
+        "*"
+      ],
+      "variables": {
+        "MIX_ENV": "prod",
+        "MIX_HOME": "/root/.mix"
+      },
+      "caches": [
+        "mix-build"
+      ]
+    }
+  ],
+  "caches": {
+    "apt": {
+      "directory": "/var/cache/apt",
+      "type": "locked"
+    },
+    "apt-lists": {
+      "directory": "/var/lib/apt/lists",
+      "type": "locked"
+    },
+    "mix-build": {
+      "directory": "/app/_build",
+      "type": "shared"
+    },
+    "mix-deps": {
+      "directory": "/app/deps",
+      "type": "shared"
+    }
+  },
+  "deploy": {
+    "base": {
+      "image": "ghcr.io/railwayapp/railpack-runtime:latest"
+    },
+    "inputs": [
+      {
+        "include": [
+          "/mise/shims",
+          "/mise/installs",
+          "/usr/local/bin/mise",
+          "/etc/mise/config.toml",
+          "/root/.local/state/mise"
+        ],
+        "step": "packages:mise"
+      },
+      {
+        "include": [
+          "."
+        ],
+        "step": "build"
+      }
+    ],
+    "startCommand": "/app/_build/prod/rel/my_app/bin/my_app start",
+    "variables": {
+      "ELIXIR_ERL_OPTIONS": "+fnu",
+      "LANG": "en_US.UTF-8",
+      "MIX_ENV": "prod",
+      "MIX_HOME": "/root/.mix"
+    }
+  }
+}

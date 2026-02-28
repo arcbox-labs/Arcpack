@@ -75,6 +75,8 @@ pub struct GenerateContext {
     pub logs: LogCollector,
     pub resolver: Resolver,
     pub mise_step_builder: Option<MiseStepBuilder>,
+    /// 额外的命名 MiseStepBuilder（如 Java 运行时 JDK）
+    pub additional_mise_builders: Vec<(String, MiseStepBuilder)>,
 }
 
 impl GenerateContext {
@@ -102,6 +104,7 @@ impl GenerateContext {
             logs: LogCollector::new(),
             resolver: Resolver::new(version_resolver),
             mise_step_builder: None,
+            additional_mise_builders: Vec::new(),
         };
 
         if dockerignore_ctx.has_file {
@@ -122,6 +125,15 @@ impl GenerateContext {
             ));
         }
         self.mise_step_builder.as_mut().unwrap()
+    }
+
+    /// 创建命名的 MiseStepBuilder（用于 Java 运行时 JDK 等场景）
+    pub fn new_named_mise_step_builder(&mut self, name: &str) -> &mut MiseStepBuilder {
+        self.additional_mise_builders.push((
+            name.to_string(),
+            MiseStepBuilder::new(name, &self.config),
+        ));
+        &mut self.additional_mise_builders.last_mut().unwrap().1
     }
 
     /// 进入子上下文
@@ -324,6 +336,11 @@ impl GenerateContext {
 
         // 若有 mise_step_builder，先 build 它
         if let Some(ref mise_builder) = self.mise_step_builder {
+            mise_builder.build(&mut plan, &mut options, &self.resolver, &self.app, &self.env)?;
+        }
+
+        // 构建额外的命名 mise builders（如 Java 运行时 JDK）
+        for (_, mise_builder) in &self.additional_mise_builders {
             mise_builder.build(&mut plan, &mut options, &self.resolver, &self.app, &self.env)?;
         }
 

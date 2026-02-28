@@ -14,8 +14,6 @@ use cache_store::BuildKitCacheStore;
 use step_node::StepNode;
 
 use super::platform::Platform;
-
-#[cfg(feature = "llb")]
 use crate::buildkit::proto::pb;
 
 /// Dockerfile 生成输出
@@ -477,7 +475,6 @@ impl BuildGraph {
     /// 2. 依次处理每个节点（生成 LLB 操作）
     /// 3. 生成 deploy 阶段 LLB
     /// 4. 返回 (Definition, BuildEnvironment)
-    #[cfg(feature = "llb")]
     pub fn to_llb(&mut self) -> Result<(pb::Definition, BuildEnvironment)> {
         let order = self.graph.compute_processing_order()?;
         for node_name in &order {
@@ -494,7 +491,6 @@ impl BuildGraph {
     /// - 无 WORKDIR/ENV 指令（LLB 在 ExecOp.Meta 中设置）
     /// - State 以 OperationOutput 传递
     /// - 每个 Exec 必须携带完整环境变量
-    #[cfg(feature = "llb")]
     fn process_node_llb(&mut self, name: &str) -> Result<()> {
         if !self.check_node_status(name)? {
             return Ok(());
@@ -517,7 +513,6 @@ impl BuildGraph {
     }
 
     /// process_node_llb 的核心逻辑（拆分以便 in_progress 复位）
-    #[cfg(feature = "llb")]
     fn do_process_node_llb(&mut self, name: &str) -> Result<()> {
         // 提取数据（避免借用冲突）
         let (step, input_env) = {
@@ -579,7 +574,6 @@ impl BuildGraph {
     }
 
     /// 获取节点的起始 LLB state（从 layers 构建）
-    #[cfg(feature = "llb")]
     fn get_node_starting_state_llb(
         &self,
         inputs: &[crate::plan::Layer],
@@ -599,12 +593,10 @@ impl BuildGraph {
     }
 
     /// 系统默认 PATH（LLB ExecOp 需要显式设置）
-    #[cfg(feature = "llb")]
-    const DEFAULT_SYSTEM_PATH: &'static str =
+    const DEFAULT_SYSTEM_PATH: &str =
         "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
     /// 转换 Exec 命令为 LLB ExecOp
-    #[cfg(feature = "llb")]
     fn convert_exec_command_llb(
         &mut self,
         state: crate::buildkit::llb::OperationOutput,
@@ -668,7 +660,6 @@ impl BuildGraph {
     }
 
     /// 转换 Copy 命令为 LLB copy 操作
-    #[cfg(feature = "llb")]
     fn convert_copy_command_llb(
         state: crate::buildkit::llb::OperationOutput,
         copy_cmd: &crate::plan::command::CopyCommand,
@@ -684,7 +675,6 @@ impl BuildGraph {
     }
 
     /// 转换 File 命令为 LLB make_file 操作
-    #[cfg(feature = "llb")]
     fn convert_file_command_llb(
         state: crate::buildkit::llb::OperationOutput,
         file_cmd: &crate::plan::command::FileCommand,
@@ -708,7 +698,6 @@ impl BuildGraph {
     ///
     /// 注意：ENV/WORKDIR/CMD/ENTRYPOINT 不在 LLB 中表达，
     /// 由 build_image_config() 生成 OCI ImageConfig。
-    #[cfg(feature = "llb")]
     fn build_deploy_llb(&self, _order: &[String]) -> Result<pb::Definition> {
         use crate::buildkit::llb;
 
@@ -1107,7 +1096,6 @@ mod tests {
 
     // === LLB 测试 ===
 
-    #[cfg(feature = "llb")]
     mod llb_tests {
         use super::*;
         use crate::plan::Cache;

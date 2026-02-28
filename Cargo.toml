@@ -51,17 +51,17 @@ schemars = "0.8"
 shell-words = "1"
 
 # BuildKit 客户端（Session、proto 类型、gRPC 通信）
-buildkit-client = { git = "https://github.com/arcbox-labs/buildkit-client.git", rev = "3624b041", optional = true }
+buildkit-client = { git = "https://github.com/arcbox-labs/buildkit-client.git", rev = "3624b041" }
 
 # Protobuf 序列化（LLB 原语 + gateway.proto 本地编译）
-prost = { version = "0.13", optional = true }
-prost-types = { version = "0.13", optional = true }
+prost = "0.13"
+prost-types = "0.13"
 
 # gRPC（Channel 创建 + Solve/Progress 逻辑）
-tonic = { version = "0.12", optional = true }
-tokio-stream = { version = "0.1", optional = true }
-hyper-util = { version = "0.1", optional = true, features = ["tokio"] }
-tower = { version = "0.5", optional = true }
+tonic = "0.12"
+tokio-stream = "0.1"
+hyper-util = { version = "0.1", features = ["tokio"] }
+tower = "0.5"
 
 [dev-dependencies]
 mockall = "0.13"
@@ -72,11 +72,4 @@ reqwest = { version = "0.12", features = ["blocking"] }
 serial_test = "3"
 
 [build-dependencies]
-tonic-build = { version = "0.12", optional = true }
-
-[features]
-default = []
-# LLB 原语 + protobuf 序列化（proto 类型来自 buildkit-client）
-llb = ["dep:prost", "dep:buildkit-client"]
-# gRPC 客户端 + Session（buildkit-client 提供 Session，arcpack 保留 Channel/Solve/Progress）
-grpc = ["llb", "dep:tonic", "dep:tonic-build", "dep:prost-types", "dep:tokio-stream", "dep:hyper-util", "dep:tower"]
+tonic-build = "0.12"

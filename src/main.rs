@@ -26,7 +26,6 @@ fn main() {
         Commands::Build(args) => {
             arcpack::cli::build::run_build(&args)
         }
-        #[cfg(feature = "grpc")]
         Commands::Frontend(args) => {
             arcpack::cli::frontend::run_frontend(&args)
         }

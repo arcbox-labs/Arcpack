@@ -10,7 +10,6 @@ pub mod schema;
 pub mod prepare;
 pub mod pretty_print;
 
-#[cfg(feature = "grpc")]
 pub mod frontend;
 
 use clap::{Parser, Subcommand, ArgAction};
@@ -50,7 +49,6 @@ pub enum Commands {
     Build(build::BuildArgs),
 
     /// BuildKit 前端模式（由 buildkitd 调用）
-    #[cfg(feature = "grpc")]
     Frontend(frontend::FrontendArgs),
 }
 
@@ -83,7 +81,6 @@ mod tests {
         assert_eq!(cli.verbosity, 2);
     }
 
-    #[cfg(feature = "grpc")]
     #[test]
     fn test_cli_parse_frontend_subcommand() {
         let cli = Cli::parse_from(["arcpack", "frontend"]);

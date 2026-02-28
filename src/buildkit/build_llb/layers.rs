@@ -4,13 +4,10 @@
 //! 核心逻辑：判断多个 Layer 是否可以 merge（高效但不能重叠），
 //! 还是必须逐层 copy（安全但可能冗余）。
 
+use std::collections::HashMap;
 use std::path::Path;
 
-#[cfg(feature = "llb")]
-use std::collections::HashMap;
-#[cfg(feature = "llb")]
 use crate::buildkit::llb::{self, OperationOutput};
-#[cfg(feature = "llb")]
 use super::step_node::StepNode;
 
 use crate::plan::{Filter, Layer};
@@ -349,7 +346,6 @@ fn sanitize_layer_ref(layer: &Layer) -> Option<String> {
 ///
 /// 对齐 Dockerfile 版本 `get_full_state_from_layers()`，但输出为 LLB 状态。
 /// 根据 should_merge() 决定使用 merge 或 copy 策略。
-#[cfg(feature = "llb")]
 pub fn get_full_state_from_layers_llb(
     layers: &[Layer],
     step_nodes: &HashMap<String, &StepNode>,
@@ -371,7 +367,6 @@ pub fn get_full_state_from_layers_llb(
 }
 
 /// 单个 Layer 转换为 LLB 状态
-#[cfg(feature = "llb")]
 fn layer_to_llb_state(
     layer: &Layer,
     step_nodes: &HashMap<String, &StepNode>,
@@ -396,7 +391,6 @@ fn layer_to_llb_state(
 ///
 /// 无 filter → 直接返回 layer state
 /// 有 filter → copy 指定路径到 base_image
-#[cfg(feature = "llb")]
 fn convert_single_layer_llb(
     layer: &Layer,
     step_nodes: &HashMap<String, &StepNode>,
@@ -422,7 +416,6 @@ fn convert_single_layer_llb(
 ///
 /// BuildKit MergeOp 要求每个输入是 diff（增量层），不是 full state。
 /// 因此后续层必须 copy 到 scratch 而非直接使用 full state。
-#[cfg(feature = "llb")]
 fn merge_layers_llb(
     layers: &[Layer],
     step_nodes: &HashMap<String, &StepNode>,
@@ -472,7 +465,6 @@ fn merge_layers_llb(
 }
 
 /// Copy 策略：首层为基，后续层逐路径 copy 叠加
-#[cfg(feature = "llb")]
 fn copy_layers_llb(
     layers: &[Layer],
     step_nodes: &HashMap<String, &StepNode>,
@@ -973,7 +965,6 @@ mod tests {
 
     // === LLB 策略测试 ===
 
-    #[cfg(feature = "llb")]
     mod llb_tests {
         use super::*;
         use crate::buildkit::llb::source::image;

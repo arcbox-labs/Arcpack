@@ -6,36 +6,15 @@ use std::collections::HashMap;
 
 use sha2::{Digest, Sha256};
 
-use crate::buildkit::client::{BuildKitClient, BuildRequest};
-use crate::buildkit::convert::{convert_plan_to_dockerfile, ConvertPlanOptions};
+use crate::buildkit::BuildOutput;
+use crate::buildkit::convert::{convert_plan_to_llb, ConvertPlanOptions};
 use crate::buildkit::daemon::select_daemon_manager;
 use crate::buildkit::platform::parse_platform_with_defaults;
+use crate::buildkit::grpc_client::{GrpcBuildKitClient, GrpcBuildRequest, build_export_config};
+use crate::buildkit::grpc::progress::ProgressMode;
 use crate::cli::common::{generate_build_result_for_command, parse_env_vars, CommonBuildArgs};
 use crate::cli::pretty_print::{pretty_print_build_result, OutputStream, PrintOptions};
 use crate::ArcpackError;
-
-#[cfg(feature = "llb")]
-use crate::buildkit::convert::convert_plan_to_llb;
-#[cfg(feature = "llb")]
-use crate::buildkit::client::LlbBuildRequest;
-#[cfg(feature = "grpc")]
-use crate::buildkit::grpc_client::{GrpcBuildKitClient, GrpcBuildRequest, build_export_config};
-#[cfg(feature = "grpc")]
-use crate::buildkit::grpc::progress::ProgressMode;
-
-/// 构建后端路径
-///
-/// clap ValueEnum derive 不支持 #[cfg] 在 variant 上，
-/// 所以所有 variant 始终可见，feature 检查在运行时完成。
-#[derive(Clone, Debug, PartialEq, clap::ValueEnum)]
-pub enum Backend {
-    /// Phase A：BuildPlan → Dockerfile → buildctl CLI（默认，稳定路径）
-    Dockerfile,
-    /// Phase B-2：BuildPlan → LLB → buildctl stdin
-    Llb,
-    /// Phase B-3：BuildPlan → LLB → gRPC Solve
-    Grpc,
-}
 
 /// Build 命令参数
 #[derive(Debug, clap::Args)]
@@ -75,10 +54,6 @@ pub struct BuildArgs {
     #[arg(long)]
     pub cache_export: Option<String>,
 
-    /// 构建后端：dockerfile / llb / grpc
-    #[arg(long, value_enum)]
-    pub backend: Option<Backend>,
-
     /// 输出 LLB protobuf 到文件（- 表示 stdout），不执行构建
     #[arg(long)]
     pub dump_llb: Option<String>,
@@ -86,65 +61,6 @@ pub struct BuildArgs {
     /// 以 JSON 格式输出 LLB（配合 --dump-llb）
     #[arg(long, requires = "dump_llb")]
     pub dump_llb_json: bool,
-}
-
-/// 解析后端：--backend > ARCPACK_BACKEND 环境变量 > 默认 Dockerfile
-fn resolve_backend(args: &BuildArgs) -> crate::Result<Backend> {
-    let env_val = std::env::var("ARCPACK_BACKEND").ok();
-    resolve_backend_from(args.backend.as_ref(), env_val.as_deref())
-}
-
-/// 纯逻辑后端解析（不读取全局状态，方便测试）
-///
-/// 优先级：CLI flag > env_val > 默认 Dockerfile
-fn resolve_backend_from(
-    flag: Option<&Backend>,
-    env_val: Option<&str>,
-) -> crate::Result<Backend> {
-    // 1. CLI flag 优先
-    if let Some(backend) = flag {
-        return validate_backend_feature(backend.clone());
-    }
-    // 2. 环境变量
-    if let Some(val) = env_val {
-        let backend = match val.to_lowercase().as_str() {
-            "dockerfile" => Backend::Dockerfile,
-            "llb" => Backend::Llb,
-            "grpc" => Backend::Grpc,
-            other => {
-                return Err(
-                    anyhow::anyhow!("unknown ARCPACK_BACKEND value: {other}").into(),
-                )
-            }
-        };
-        return validate_backend_feature(backend);
-    }
-    // 3. 默认
-    Ok(Backend::Dockerfile)
-}
-
-/// 校验所选后端是否有对应 feature 编译支持
-fn validate_backend_feature(backend: Backend) -> crate::Result<Backend> {
-    match &backend {
-        Backend::Llb => {
-            #[cfg(not(feature = "llb"))]
-            return Err(anyhow::anyhow!(
-                "backend 'llb' requires the 'llb' feature. \
-                 Rebuild with: cargo build --features llb"
-            )
-            .into());
-        }
-        Backend::Grpc => {
-            #[cfg(not(feature = "grpc"))]
-            return Err(anyhow::anyhow!(
-                "backend 'grpc' requires the 'grpc' feature. \
-                 Rebuild with: cargo build --features grpc"
-            )
-            .into());
-        }
-        Backend::Dockerfile => {}
-    }
-    Ok(backend)
 }
 
 /// 执行构建命令
@@ -191,48 +107,85 @@ pub fn run_build(args: &BuildArgs) -> crate::Result<bool> {
     let cache_key = args.cache_key.clone().unwrap_or_default();
     let opts = ConvertPlanOptions {
         secrets_hash: Some(secrets_hash),
-        platform: platform.clone(),
+        platform,
         cache_key,
     };
 
-    // 7.5. --dump-llb：导出 LLB 后提前返回，不需要 backend
+    // 7.5. --dump-llb：导出 LLB 后提前返回
     if let Some(ref dump_path) = args.dump_llb {
         return dump_llb_definition(plan, &opts, dump_path, args.dump_llb_json);
     }
 
-    // 8. 解析 backend（仅在实际构建时才需要）
-    let backend = resolve_backend(args)?;
-
-    // 8.5. cache 参数仅 dockerfile 后端支持，其他路径提示 warning
-    if backend != Backend::Dockerfile
-        && (args.cache_import.is_some() || args.cache_export.is_some())
-    {
+    // 8. cache 参数暂不支持
+    if args.cache_import.is_some() || args.cache_export.is_some() {
         tracing::warn!(
-            "--cache-import/--cache-export are only supported with the 'dockerfile' backend; \
-             these flags will be ignored for backend '{:?}'",
-            backend
+            "--cache-import/--cache-export are not yet supported in gRPC mode; \
+             these flags will be ignored"
         );
     }
 
-    // 9. 按 backend 分路构建
-    match backend {
-        Backend::Dockerfile => build_via_dockerfile(args, plan, &opts, &platform, &env_vars),
-        Backend::Llb => build_via_llb(args, plan, &opts, &env_vars),
-        Backend::Grpc => build_via_grpc(args, plan, &opts, &env_vars),
-    }
+    // 9. BuildPlan → LLB → gRPC Solve
+    let llb_result = convert_plan_to_llb(plan, &opts)?;
+
+    // 当 --name 和 --output 均未指定时，从源码目录名派生镜像名
+    let default_name;
+    let image_name = if args.name.is_some() || args.output.is_some() {
+        args.name.as_deref()
+    } else {
+        let dir_path = std::path::Path::new(&args.common.directory);
+        let dir_abs = dir_path
+            .canonicalize()
+            .unwrap_or_else(|_| dir_path.to_path_buf());
+        let raw = dir_abs
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+        default_name = sanitize_image_name(raw);
+        Some(default_name.as_str())
+    };
+
+    let export = build_export_config(
+        image_name,
+        args.output.as_ref().map(std::path::PathBuf::from).as_ref(),
+        false,
+    )
+    .map_err(ArcpackError::Other)?;
+
+    let progress_mode = match args.progress.as_str() {
+        "plain" => ProgressMode::Plain,
+        "tty" => ProgressMode::Tty,
+        "quiet" => ProgressMode::Quiet,
+        _ => ProgressMode::Auto,
+    };
+
+    let context_dir = std::path::PathBuf::from(&args.common.directory);
+
+    run_with_daemon(|addr| async move {
+        let client = GrpcBuildKitClient::new(&addr)
+            .await
+            .map_err(ArcpackError::Other)?;
+
+        let mut local_dirs = HashMap::new();
+        local_dirs.insert("context".to_string(), context_dir);
+
+        let request = GrpcBuildRequest {
+            definition: llb_result.definition,
+            image_config: llb_result.image_config,
+            export,
+            secrets: env_vars,
+            local_dirs,
+            progress_mode,
+        };
+
+        client.build(request).await.map_err(ArcpackError::Other)
+    })
 }
 
 /// 启动 daemon → wait_ready → 执行构建 → 停止 daemon
-///
-/// 将三条构建路径共用的 daemon 生命周期管理提取为单一入口。
-/// `label` 仅用于成功日志（如 ""、"（LLB）"、"（gRPC）"）。
-fn run_with_daemon<F, Fut>(
-    label: &str,
-    build_fn: F,
-) -> crate::Result<bool>
+fn run_with_daemon<F, Fut>(build_fn: F) -> crate::Result<bool>
 where
     F: FnOnce(String) -> Fut,
-    Fut: std::future::Future<Output = crate::Result<crate::buildkit::client::BuildOutput>>,
+    Fut: std::future::Future<Output = crate::Result<BuildOutput>>,
 {
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| anyhow::anyhow!("无法创建 tokio 运行时: {}", e))?;
@@ -254,144 +207,9 @@ where
         }
 
         let output = build_result?;
-        eprintln!("构建完成{label}，耗时 {:.1}s", output.duration.as_secs_f64());
+        eprintln!("构建完成，耗时 {:.1}s", output.duration.as_secs_f64());
         Ok(true)
     })
-}
-
-/// Phase A：BuildPlan → Dockerfile → buildctl CLI
-fn build_via_dockerfile(
-    args: &BuildArgs,
-    plan: &crate::plan::BuildPlan,
-    opts: &ConvertPlanOptions,
-    platform: &crate::buildkit::platform::Platform,
-    env_vars: &HashMap<String, String>,
-) -> crate::Result<bool> {
-    let convert_result = convert_plan_to_dockerfile(plan, opts)?;
-
-    run_with_daemon("", |addr| async move {
-        let client = BuildKitClient::new(addr);
-        let request = BuildRequest {
-            context_dir: std::path::PathBuf::from(&args.common.directory),
-            dockerfile_content: convert_result.dockerfile,
-            image_name: args.name.clone(),
-            output_dir: args.output.as_ref().map(std::path::PathBuf::from),
-            push: false,
-            platform: platform.to_string(),
-            progress_mode: args.progress.clone(),
-            cache_import: args.cache_import.clone(),
-            cache_export: args.cache_export.clone(),
-            secrets: env_vars.clone(),
-        };
-
-        client.build(&request).await
-    })
-}
-
-/// Phase B-2：BuildPlan → LLB → buildctl stdin
-#[cfg(feature = "llb")]
-fn build_via_llb(
-    args: &BuildArgs,
-    plan: &crate::plan::BuildPlan,
-    opts: &ConvertPlanOptions,
-    env_vars: &HashMap<String, String>,
-) -> crate::Result<bool> {
-    let llb_result = convert_plan_to_llb(plan, opts)?;
-
-    run_with_daemon("（LLB）", |addr| async move {
-        let client = BuildKitClient::new(addr);
-        let request = LlbBuildRequest {
-            definition: llb_result.definition,
-            context_dir: std::path::PathBuf::from(&args.common.directory),
-            image_name: args.name.clone(),
-            output_dir: args.output.as_ref().map(std::path::PathBuf::from),
-            push: false,
-            progress_mode: args.progress.clone(),
-            secrets: env_vars.clone(),
-            no_cache: false,
-        };
-
-        client.build_from_llb(&request).await
-    })
-}
-
-#[cfg(not(feature = "llb"))]
-fn build_via_llb(
-    _args: &BuildArgs,
-    _plan: &crate::plan::BuildPlan,
-    _opts: &ConvertPlanOptions,
-    _env_vars: &HashMap<String, String>,
-) -> crate::Result<bool> {
-    Err(anyhow::anyhow!(
-        "backend 'llb' requires the 'llb' feature. \
-         Rebuild with: cargo build --features llb"
-    )
-    .into())
-}
-
-/// Phase B-3：BuildPlan → LLB → gRPC Solve
-#[cfg(feature = "grpc")]
-fn build_via_grpc(
-    args: &BuildArgs,
-    plan: &crate::plan::BuildPlan,
-    opts: &ConvertPlanOptions,
-    env_vars: &HashMap<String, String>,
-) -> crate::Result<bool> {
-    let llb_result = convert_plan_to_llb(plan, opts)?;
-
-    let export = build_export_config(
-        args.name.as_deref(),
-        args.output.as_ref().map(std::path::PathBuf::from).as_ref(),
-        false, // push
-    )
-    .map_err(ArcpackError::Other)?;
-
-    let progress_mode = match args.progress.as_str() {
-        "plain" => ProgressMode::Plain,
-        "tty" => ProgressMode::Tty,
-        "quiet" => ProgressMode::Quiet,
-        _ => ProgressMode::Auto,
-    };
-
-    run_with_daemon("（gRPC）", |addr| async move {
-        let client = GrpcBuildKitClient::new(&addr)
-            .await
-            .map_err(ArcpackError::Other)?;
-
-        let mut local_dirs = HashMap::new();
-        local_dirs.insert(
-            "context".to_string(),
-            std::path::PathBuf::from(&args.common.directory),
-        );
-
-        let request = GrpcBuildRequest {
-            definition: llb_result.definition,
-            image_config: llb_result.image_config,
-            export,
-            secrets: env_vars.clone(),
-            local_dirs,
-            progress_mode,
-        };
-
-        client
-            .build(request)
-            .await
-            .map_err(ArcpackError::Other)
-    })
-}
-
-#[cfg(not(feature = "grpc"))]
-fn build_via_grpc(
-    _args: &BuildArgs,
-    _plan: &crate::plan::BuildPlan,
-    _opts: &ConvertPlanOptions,
-    _env_vars: &HashMap<String, String>,
-) -> crate::Result<bool> {
-    Err(anyhow::anyhow!(
-        "backend 'grpc' requires the 'grpc' feature. \
-         Rebuild with: cargo build --features grpc"
-    )
-    .into())
 }
 
 // === --dump-llb 调试功能 ===
@@ -403,34 +221,21 @@ fn dump_llb_definition(
     dump_path: &str,
     as_json: bool,
 ) -> crate::Result<bool> {
-    #[cfg(feature = "llb")]
-    {
-        let llb_result = convert_plan_to_llb(plan, opts)?;
-        if as_json {
-            let json = definition_to_json(&llb_result.definition)?;
-            let output = serde_json::to_string_pretty(&json)?;
-            write_dump_output(dump_path, output.as_bytes())?;
-        } else {
-            use prost::Message;
-            write_dump_output(dump_path, &llb_result.definition.encode_to_vec())?;
-        }
-        return Ok(true);
+    let llb_result = convert_plan_to_llb(plan, opts)?;
+    if as_json {
+        let json = definition_to_json(&llb_result.definition)?;
+        let output = serde_json::to_string_pretty(&json)?;
+        write_dump_output(dump_path, output.as_bytes())?;
+    } else {
+        use prost::Message;
+        write_dump_output(dump_path, &llb_result.definition.encode_to_vec())?;
     }
-    #[cfg(not(feature = "llb"))]
-    {
-        let _ = (plan, opts, dump_path, as_json);
-        Err(anyhow::anyhow!(
-            "--dump-llb requires the 'llb' feature. \
-             Rebuild with: cargo build --features llb"
-        )
-        .into())
-    }
+    Ok(true)
 }
 
 /// 将 LLB Definition 转换为 JSON 值（调试用）
 ///
 /// 解码每个 pb::Op 并描述类型和关键字段
-#[cfg(feature = "llb")]
 pub(crate) fn definition_to_json(
     def: &crate::buildkit::proto::pb::Definition,
 ) -> crate::Result<serde_json::Value> {
@@ -491,7 +296,6 @@ pub(crate) fn definition_to_json(
 }
 
 /// 写入导出数据到文件或 stdout（- 表示 stdout）
-#[cfg(feature = "llb")]
 pub(crate) fn write_dump_output(path: &str, data: &[u8]) -> crate::Result<()> {
     if path == "-" {
         use std::io::Write;
@@ -506,6 +310,24 @@ pub(crate) fn write_dump_output(path: &str, data: &[u8]) -> crate::Result<()> {
 }
 
 // === 辅助函数 ===
+
+/// 将目录名规范化为合法的 OCI 镜像名
+///
+/// 规则：小写，仅保留 `[a-z0-9._-]`，其余字符替换为 `-`，
+/// 去除首尾 `-/.`，空串回退到 `app`。
+fn sanitize_image_name(raw: &str) -> String {
+    let sanitized: String = raw
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' { c } else { '-' })
+        .collect();
+    let trimmed = sanitized.trim_matches(|c: char| c == '-' || c == '.');
+    if trimmed.is_empty() {
+        "app".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
 
 /// 注入 GITHUB_TOKEN 到 mise install 步骤的 secrets 列表
 ///
@@ -532,11 +354,7 @@ fn inject_github_token_for_mise(
     // 对于显式列出 secrets（非通配符）的步骤，也需要注入
     for step in &mut plan.steps {
         let has_mise = step.commands.iter().any(|cmd| {
-            if let crate::plan::Command::Exec(exec) = cmd {
-                exec.cmd.contains("mise install")
-            } else {
-                false
-            }
+            matches!(cmd, crate::plan::Command::Exec(exec) if exec.cmd.contains("mise install"))
         });
         if has_mise
             && !step.secrets.iter().any(|s| s == "*")
@@ -582,81 +400,6 @@ mod tests {
     use super::*;
     use clap::Parser;
     use crate::plan::BuildPlan;
-
-    // === Backend 枚举与解析测试 ===
-
-    #[test]
-    fn test_backend_default_is_none() {
-        let cli = crate::cli::Cli::parse_from(["arcpack", "build", "."]);
-        if let crate::cli::Commands::Build(args) = cli.command {
-            assert!(args.backend.is_none(), "默认应为 None");
-        } else {
-            panic!("Expected Build command");
-        }
-    }
-
-    #[test]
-    fn test_backend_flag_llb_parses() {
-        let cli =
-            crate::cli::Cli::parse_from(["arcpack", "build", ".", "--backend", "llb"]);
-        if let crate::cli::Commands::Build(args) = cli.command {
-            assert_eq!(args.backend, Some(Backend::Llb));
-        } else {
-            panic!("Expected Build command");
-        }
-    }
-
-    #[test]
-    fn test_backend_flag_grpc_parses() {
-        let cli =
-            crate::cli::Cli::parse_from(["arcpack", "build", ".", "--backend", "grpc"]);
-        if let crate::cli::Commands::Build(args) = cli.command {
-            assert_eq!(args.backend, Some(Backend::Grpc));
-        } else {
-            panic!("Expected Build command");
-        }
-    }
-
-    #[test]
-    fn test_backend_flag_invalid_rejected() {
-        let result =
-            crate::cli::Cli::try_parse_from(["arcpack", "build", ".", "--backend", "foobar"]);
-        assert!(result.is_err(), "无效的 backend 值应被 clap 拒绝");
-    }
-
-    #[test]
-    fn test_resolve_backend_default_dockerfile() {
-        let backend = resolve_backend_from(None, None).unwrap();
-        assert_eq!(backend, Backend::Dockerfile);
-    }
-
-    #[test]
-    fn test_resolve_backend_env_override() {
-        let result = resolve_backend_from(None, Some("llb"));
-        // llb feature 可能未启用，检查是否正确解析了值
-        #[cfg(feature = "llb")]
-        assert_eq!(result.unwrap(), Backend::Llb);
-        #[cfg(not(feature = "llb"))]
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_resolve_backend_flag_over_env() {
-        // flag=dockerfile + env=grpc → flag 胜出
-        let backend =
-            resolve_backend_from(Some(&Backend::Dockerfile), Some("grpc")).unwrap();
-        assert_eq!(backend, Backend::Dockerfile, "CLI flag 应覆盖环境变量");
-    }
-
-    #[test]
-    fn test_resolve_backend_env_invalid() {
-        let result = resolve_backend_from(None, Some("foobar"));
-        assert!(result.is_err());
-        assert!(
-            result.unwrap_err().to_string().contains("foobar"),
-            "错误信息应包含无效值"
-        );
-    }
 
     // === --dump-llb 解析测试 ===
 
@@ -706,7 +449,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "llb")]
     #[test]
     fn test_write_dump_output_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -716,7 +458,6 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), data);
     }
 
-    #[cfg(feature = "llb")]
     #[test]
     fn test_write_dump_output_dash_does_not_panic() {
         // - 路径写入 stdout，只验证不 panic
@@ -725,7 +466,6 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[cfg(feature = "llb")]
     #[test]
     fn test_definition_to_json_structure() {
         use crate::buildkit::proto::pb;
@@ -873,5 +613,37 @@ mod tests {
         } else {
             panic!("Expected Build command");
         }
+    }
+
+    // === sanitize_image_name 测试 ===
+
+    #[test]
+    fn test_sanitize_image_name_lowercase() {
+        assert_eq!(sanitize_image_name("MyApp"), "myapp");
+    }
+
+    #[test]
+    fn test_sanitize_image_name_special_chars() {
+        assert_eq!(sanitize_image_name("my app@v2"), "my-app-v2");
+    }
+
+    #[test]
+    fn test_sanitize_image_name_leading_trailing() {
+        assert_eq!(sanitize_image_name("--my-app-."), "my-app");
+    }
+
+    #[test]
+    fn test_sanitize_image_name_empty() {
+        assert_eq!(sanitize_image_name(""), "app");
+    }
+
+    #[test]
+    fn test_sanitize_image_name_all_invalid() {
+        assert_eq!(sanitize_image_name("@#$"), "app");
+    }
+
+    #[test]
+    fn test_sanitize_image_name_dots_and_underscores_preserved() {
+        assert_eq!(sanitize_image_name("my_app.v2"), "my_app.v2");
     }
 }

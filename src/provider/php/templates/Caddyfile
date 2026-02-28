@@ -1,0 +1,12 @@
+{
+	frankenphp
+	order php_server before file_server
+	admin off
+}
+
+:{{PORT}} {
+	root * {{ROOT_DIR}}
+	encode zlib gzip
+
+	php_server
+}
