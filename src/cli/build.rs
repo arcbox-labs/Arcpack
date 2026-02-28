@@ -367,7 +367,6 @@ fn build_via_grpc(
         let request = GrpcBuildRequest {
             definition: llb_result.definition,
             image_config: llb_result.image_config,
-            context_dir: std::path::PathBuf::from(&args.common.directory),
             export,
             secrets: env_vars.clone(),
             local_dirs,

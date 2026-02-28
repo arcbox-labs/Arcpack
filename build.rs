@@ -1,36 +1,38 @@
 fn main() {
-    // B-1/B-2：LLB 原语只需 ops.proto（不生成 gRPC client/server 代码）
-    #[cfg(feature = "llb")]
-    {
-        tonic_build::configure()
-            .build_server(false)
-            .build_client(false)
-            .compile_protos(
-                &["proto/moby/buildkit/v1/ops.proto"],
-                &["proto/"],
-            )
-            .expect("Failed to compile ops.proto");
-    }
-
-    // B-3/B-4：gRPC 需要额外的 service proto（control/filesync/secrets）
-    // Session 需要 server 端代码（响应 buildkitd 回调）
-    // extern_path: ops.proto 的 pb 包已在 llb 块编译，此处引用现有类型避免重复生成
+    // LLB proto 类型（pb 包）由 buildkit-client 提供，arcpack 不再需要本地编译。
+    // gRPC service proto（control/filesync/secrets）同样由 buildkit-client 提供。
+    //
+    // 唯一需要本地编译的是 gateway.proto（LLBBridge service），
+    // buildkit-client 目前不编译该 proto。使用 extern_path 将 gateway 引用的
+    // 其他包类型指向 buildkit-client 已有的 Rust 类型，避免重复生成。
     #[cfg(feature = "grpc")]
     {
         tonic_build::configure()
-            .build_server(true)
+            .build_server(false)
             .build_client(true)
-            .extern_path(".pb", "crate::buildkit::proto::pb")
+            // ⚠ 以下 extern_path 映射依赖 buildkit-client 的模块结构
+            // （proto::pb, proto::fsutil::types, proto::moby::buildkit::v1::*）。
+            // 升级 buildkit-client 版本时需验证这些路径仍然有效。
+            // 当前锁定版本: rev = "3624b041"
+            .extern_path(".pb", "::buildkit_client::proto::pb")
+            .extern_path(".fsutil.types", "::buildkit_client::proto::fsutil::types")
+            .extern_path(
+                ".moby.buildkit.v1.types",
+                "::buildkit_client::proto::moby::buildkit::v1::types",
+            )
+            .extern_path(
+                ".moby.buildkit.v1.sourcepolicy",
+                "::buildkit_client::proto::moby::buildkit::v1::sourcepolicy",
+            )
+            .extern_path(".google.rpc", "::buildkit_client::proto::google::rpc")
             .compile_protos(
                 &[
-                    "proto/moby/buildkit/v1/control.proto",
-                    "proto/moby/buildkit/v1/filesync.proto",
-                    "proto/moby/buildkit/v1/secrets.proto",
-                    "proto/moby/buildkit/v1/auth.proto",
                     "proto/moby/buildkit/v1/gateway.proto",
+                    // caps.proto 和 worker.proto 不做 extern_path，本地生成
+                    // （buildkit-client 不导出这些模块）
                 ],
                 &["proto/"],
             )
-            .expect("Failed to compile gRPC protos");
+            .expect("Failed to compile gateway.proto");
     }
 }

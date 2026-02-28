@@ -1,12 +1,9 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
-use tonic::transport::Channel;
+use anyhow::Result;
 
-use crate::buildkit::proto::control::{
-    control_client::ControlClient, Exporter, SolveRequest, SolveResponse,
-};
+use crate::buildkit::proto::control::{Exporter, SolveRequest};
 use crate::buildkit::proto::pb;
 
 /// Solve RPC 配置
@@ -30,11 +27,6 @@ pub enum ExportConfig {
     Local { dest: PathBuf },
     /// 输出为 Docker tar（docker load 兼容）
     DockerTar { name: String, dest: PathBuf },
-}
-
-/// Solve RPC 结果
-pub struct SolveResult {
-    pub exporter_response: HashMap<String, String>,
 }
 
 /// 构造 SolveRequest protobuf 消息（纯函数，便于测试）
@@ -81,29 +73,6 @@ pub fn build_solve_request(config: &SolveConfig) -> Result<SolveRequest> {
         exporters: vec![exporter],
         ..Default::default()
     })
-}
-
-/// 发送 Solve RPC 到 buildkitd
-///
-/// 接受已构造的 SolveRequest，避免重复生成 ref 导致
-/// 进度订阅 ref 与实际构建 ref 不一致。
-pub async fn solve(
-    client: &mut ControlClient<Channel>,
-    request: SolveRequest,
-) -> Result<SolveResult> {
-    let response = client
-        .solve(request)
-        .await
-        .context("Solve RPC failed")?
-        .into_inner();
-
-    Ok(parse_solve_response(response))
-}
-
-fn parse_solve_response(resp: SolveResponse) -> SolveResult {
-    SolveResult {
-        exporter_response: resp.exporter_response,
-    }
 }
 
 /// 生成随机 Solve ref（用于关联 Status 流）
@@ -290,20 +259,4 @@ mod tests {
         assert!(req.r#ref.starts_with("arcpack-"));
     }
 
-    #[test]
-    fn test_parse_solve_response() {
-        let mut exporter_response = HashMap::new();
-        exporter_response.insert(
-            "containerimage.digest".to_string(),
-            "sha256:abc123".to_string(),
-        );
-
-        let resp = SolveResponse { exporter_response };
-        let result = parse_solve_response(resp);
-
-        assert_eq!(
-            result.exporter_response.get("containerimage.digest").unwrap(),
-            "sha256:abc123"
-        );
-    }
 }
