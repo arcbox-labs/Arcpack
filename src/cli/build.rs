@@ -10,6 +10,7 @@ use crate::buildkit::BuildOutput;
 use crate::buildkit::convert::{convert_plan_to_llb, ConvertPlanOptions};
 use crate::buildkit::daemon::select_daemon_manager;
 use crate::buildkit::platform::parse_platform_with_defaults;
+use crate::buildkit::grpc::solve::CacheConfig;
 use crate::buildkit::grpc_client::{GrpcBuildKitClient, GrpcBuildRequest, build_export_config};
 use crate::buildkit::grpc::progress::ProgressMode;
 use crate::cli::common::{generate_build_result_for_command, parse_env_vars, CommonBuildArgs};
@@ -116,13 +117,17 @@ pub fn run_build(args: &BuildArgs) -> crate::Result<bool> {
         return dump_llb_definition(plan, &opts, dump_path, args.dump_llb_json);
     }
 
-    // 8. cache 参数暂不支持
-    if args.cache_import.is_some() || args.cache_export.is_some() {
-        tracing::warn!(
-            "--cache-import/--cache-export are not yet supported in gRPC mode; \
-             these flags will be ignored"
-        );
-    }
+    // 8. 解析缓存配置
+    let cache_imports: Vec<CacheConfig> = args
+        .cache_import
+        .iter()
+        .map(|s| CacheConfig::parse(s))
+        .collect();
+    let cache_exports: Vec<CacheConfig> = args
+        .cache_export
+        .iter()
+        .map(|s| CacheConfig::parse(s))
+        .collect();
 
     // 9. BuildPlan → LLB → gRPC Solve
     let llb_result = convert_plan_to_llb(plan, &opts)?;
@@ -175,6 +180,8 @@ pub fn run_build(args: &BuildArgs) -> crate::Result<bool> {
             secrets: env_vars,
             local_dirs,
             progress_mode,
+            cache_imports,
+            cache_exports,
         };
 
         client.build(request).await.map_err(ArcpackError::Other)

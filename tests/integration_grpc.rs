@@ -98,6 +98,8 @@ async fn test_grpc_build_via_solve() {
         secrets: HashMap::new(),
         local_dirs,
         progress_mode: ProgressMode::Plain,
+        cache_imports: vec![],
+        cache_exports: vec![],
     };
 
     let output = client.build(request).await

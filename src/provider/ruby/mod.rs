@@ -14,6 +14,7 @@ use crate::generate::mise_step_builder::{self, MiseStepBuilder};
 use crate::generate::GenerateContext;
 use crate::plan::{Command, Filter, Layer};
 use crate::provider::Provider;
+use crate::provider::node::NodeProvider;
 use crate::Result;
 
 /// 默认 Ruby 版本
@@ -129,6 +130,21 @@ impl RubyProvider {
             }
         }
         gems
+    }
+
+    /// 解析 Gemfile 中的 path: 引用（本地 gem 路径）
+    fn parse_local_gem_paths(content: &str) -> Vec<String> {
+        let mut paths = Vec::new();
+        let re = Regex::new(r#"(?:gem\s+['"][^'"]+['"]\s*,.*path:\s*['"]([^'"]+)['"]|path\s+['"]([^'"]+)['"])"#).unwrap();
+        for caps in re.captures_iter(content) {
+            if let Some(m) = caps.get(1).or(caps.get(2)) {
+                let path = m.as_str().to_string();
+                if !paths.contains(&path) {
+                    paths.push(path);
+                }
+            }
+        }
+        paths
     }
 
     /// 检测 Rails 应用
@@ -255,6 +271,8 @@ impl Provider for RubyProvider {
         // 元数据
         ctx.metadata.set("rubyVersion", &self.ruby_version);
         ctx.metadata.set_bool("rubyRails", self.is_rails);
+        ctx.metadata.set_bool("rubyAssetPipeline", self.has_asset_pipeline);
+        ctx.metadata.set_bool("rubyBootsnap", self.has_bootsnap);
 
         // === mise 步骤：安装 Ruby ===
         Self::ensure_mise_step_builder(ctx);
@@ -269,6 +287,20 @@ impl Provider for RubyProvider {
             mise.add_supporting_apt_package("libjemalloc-dev");
             mise.add_supporting_apt_package("zlib1g-dev");
             mise.add_supporting_apt_package("libffi-dev");
+            mise.add_supporting_apt_package("procps");
+
+            // YJIT 支持：Ruby >= 3.2 需要 rustc 和 cargo
+            {
+                let parts: Vec<&str> = self.ruby_version.splitn(3, '.').collect();
+                let major_minor = parts
+                    .first()
+                    .and_then(|a| a.parse::<u32>().ok())
+                    .zip(parts.get(1).and_then(|b| b.parse::<u32>().ok()));
+                if major_minor.map_or(false, |(maj, min)| (maj, min) >= (3, 2)) {
+                    mise.add_supporting_apt_package("rustc");
+                    mise.add_supporting_apt_package("cargo");
+                }
+            }
 
             // gem 特定构建依赖
             for pkg in self.get_build_apt_packages() {
@@ -318,10 +350,24 @@ impl Provider for RubyProvider {
                 install.add_command(Command::new_copy(".ruby-version", ".ruby-version"));
             }
 
+            // 复制本地 gem 路径
+            if let Ok(gemfile_content) = ctx.app.read_file("Gemfile") {
+                for gem_path in Self::parse_local_gem_paths(&gemfile_content) {
+                    if ctx.app.has_match(&gem_path) {
+                        install.add_command(Command::new_copy(&gem_path, &gem_path));
+                    }
+                }
+            }
+
             // bundle install
             install.add_command(Command::new_exec(
                 "bundle install --jobs=4 --retry=3 --without development test",
             ));
+
+            // Secrets 前缀
+            install.use_secrets_with_prefix(&ctx.env, "RUBY");
+            install.use_secrets_with_prefix(&ctx.env, "GEM");
+            install.use_secrets_with_prefix(&ctx.env, "BUNDLE");
         }
 
         // gem 缓存
@@ -339,6 +385,11 @@ impl Provider for RubyProvider {
             let build = Self::get_command_step(&mut ctx.steps, "build");
             build.add_input(local_layer);
 
+            // build Secrets 前缀
+            build.use_secrets_with_prefix(&ctx.env, "RAILS");
+            build.use_secrets_with_prefix(&ctx.env, "BUNDLE");
+            build.use_secrets_with_prefix(&ctx.env, "BOOTSNAP");
+
             if self.is_rails {
                 // 资产编译
                 if self.has_asset_pipeline {
@@ -355,6 +406,37 @@ impl Provider for RubyProvider {
             }
         }
 
+        // === Node.js 集成 ===
+        let has_package_json = ctx.app.has_file("package.json");
+        let has_execjs = self.gems.iter().any(|g| g == "execjs");
+        let has_node = has_package_json || has_execjs;
+
+        if has_node {
+            let mut node = NodeProvider::new();
+            node.initialize(ctx)?;
+
+            // 注册 Node.js 到 mise（execjs 仅需运行时，不需要 npm install）
+            node.install_mise_packages(ctx)?;
+
+            // 有 package.json 时才运行完整 Node.js 构建流水线
+            if has_package_json {
+                // install:node 步骤
+                let install_node = ctx.new_command_step("install:node");
+                install_node.add_input(Layer::new_step_layer("install", None));
+                node.install_node_deps(ctx, "install:node")?;
+
+                // build:node 步骤
+                let build_node = ctx.new_command_step("build:node");
+                build_node.add_input(Layer::new_step_layer("install:node", None));
+                node.build_node(ctx, "build:node")?;
+
+                // prune:node 步骤（移除 devDependencies）
+                let prune_node = ctx.new_command_step("prune:node");
+                prune_node.add_input(Layer::new_step_layer("build:node", None));
+                node.prune_node_deps(ctx, "prune:node")?;
+            }
+        }
+
         // === Deploy 配置 ===
         ctx.deploy.start_cmd = Some(self.get_start_command());
 
@@ -366,7 +448,7 @@ impl Provider for RubyProvider {
             ("MALLOC_ARENA_MAX".to_string(), "2".to_string()),
             (
                 "LD_PRELOAD".to_string(),
-                "libjemalloc.so".to_string(),
+                "libjemalloc.so.2".to_string(),
             ),
             (
                 "RAILS_ENV".to_string(),
@@ -399,8 +481,9 @@ impl Provider for RubyProvider {
             .map(|m| m.get_layer())
             .unwrap_or_default();
 
+        let build_step_name = if has_package_json { "prune:node" } else { "build" };
         let build_layer = Layer::new_step_layer(
-            "build",
+            build_step_name,
             Some(Filter::include_only(vec![".".to_string()])),
         );
 

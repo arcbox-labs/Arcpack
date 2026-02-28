@@ -179,56 +179,29 @@ impl NodeProvider {
             .downcast_mut::<CommandStepBuilder>()
             .unwrap()
     }
-}
 
-impl Provider for NodeProvider {
-    fn name(&self) -> &str {
-        "node"
-    }
-
-    fn detect(&self, app: &App, _env: &Environment) -> Result<bool> {
-        Ok(app.has_file("package.json"))
-    }
-
-    fn initialize(&mut self, ctx: &mut GenerateContext) -> Result<()> {
-        let package_json = self.get_package_json(&ctx.app)?;
-        self.package_manager = detect::detect_package_manager(&ctx.app, &package_json);
-        self.workspace_packages = workspace::resolve_workspace_packages(&ctx.app)?;
-        self.package_json = Some(package_json);
-        Ok(())
-    }
-
-    fn plan(&self, ctx: &mut GenerateContext) -> Result<()> {
-        if self.package_json.is_none() {
-            return Err(anyhow::anyhow!("package.json not found").into());
-        }
-
-        // 设置元数据
-        ctx.metadata.set("nodePackageManager", &self.package_manager.to_string());
-        ctx.metadata.set_bool("nodeUsesCorepack", self.uses_corepack());
-
+    /// 向 mise step 添加 Node.js 运行时包
+    ///
+    /// 注册 Node/Bun、包管理器版本、Corepack 配置。
+    /// 可被 PHP/Ruby/Elixir Provider 调用以支持双语言构建。
+    pub fn install_mise_packages(&self, ctx: &mut GenerateContext) -> Result<()> {
         let requires_node = self.requires_node();
         let requires_bun = self.requires_bun();
         let uses_corepack = self.uses_corepack();
 
-        // === 安装 mise 包 ===
-        // 使用 ensure + 直接字段访问避免双重可变借用
         Self::ensure_mise_step_builder(ctx);
 
         if requires_node {
-            // 注册 Node.js 包（通过直接字段访问实现不相交借用）
             let node_ref = {
                 let mise = ctx.mise_step_builder.as_mut().unwrap();
                 mise.default_package(&mut ctx.resolver, "node", DEFAULT_NODE_VERSION)
             };
 
-            // 环境变量覆盖
             if let (Some(env_version), var_name) = ctx.env.get_config_variable("NODE_VERSION") {
                 let mise = ctx.mise_step_builder.as_mut().unwrap();
                 mise.version(&mut ctx.resolver, &node_ref, &env_version, &var_name);
             }
 
-            // engines.node 覆盖
             if let Some(ref pkg) = self.package_json {
                 if let Some(engine_node) = pkg.engines.get("node") {
                     if !engine_node.is_empty() {
@@ -257,14 +230,14 @@ impl Provider for NodeProvider {
                 mise.version(&mut ctx.resolver, &bun_ref, &env_version, &var_name);
             }
 
-            // bun 是主 PM 但不需要 node 时，仍安装 node（node-gyp）
             if !requires_node && !ctx.config.packages.contains_key("node") {
                 let node_ref = {
                     let mise = ctx.mise_step_builder.as_mut().unwrap();
                     mise.default_package(&mut ctx.resolver, "node", DEFAULT_NODE_VERSION)
                 };
 
-                if let (Some(env_version), var_name) = ctx.env.get_config_variable("NODE_VERSION")
+                if let (Some(env_version), var_name) =
+                    ctx.env.get_config_variable("NODE_VERSION")
                 {
                     let mise = ctx.mise_step_builder.as_mut().unwrap();
                     mise.version(&mut ctx.resolver, &node_ref, &env_version, &var_name);
@@ -274,7 +247,6 @@ impl Provider for NodeProvider {
             }
         }
 
-        // 安装包管理器特定版本
         if let Some(ref pkg) = self.package_json {
             let mise = ctx.mise_step_builder.as_mut().unwrap();
             self.package_manager
@@ -288,6 +260,143 @@ impl Provider for NodeProvider {
             }
         }
 
+        Ok(())
+    }
+
+    /// 生成依赖安装命令（npm/pnpm/yarn/bun install）
+    ///
+    /// 调用前需确保 step 已创建并已添加 mise layer input。
+    /// 可被 PHP/Ruby Provider 调用以支持双语言构建。
+    pub fn install_node_deps(&self, ctx: &mut GenerateContext, step_name: &str) -> Result<()> {
+        let uses_corepack = self.uses_corepack();
+
+        {
+            let env_vars = self.get_node_env_vars();
+            let step = Self::get_command_step(&mut ctx.steps, step_name);
+
+            step.add_variables(&env_vars);
+            // 清空 secrets 后重新按前缀添加——install_node_deps 总是在新建 step 上调用，
+            // 这里显式清空是防御性写法，确保不会意外继承其他 provider 注入的 secrets。
+            step.secrets = vec![];
+            step.use_secrets_with_prefix(&ctx.env, "NODE");
+            step.use_secrets_with_prefix(&ctx.env, "NPM");
+            step.use_secrets_with_prefix(&ctx.env, "BUN");
+            step.use_secrets_with_prefix(&ctx.env, "PNPM");
+            step.use_secrets_with_prefix(&ctx.env, "YARN");
+            step.use_secrets_with_prefix(&ctx.env, "CI");
+            step.add_paths(&["/app/node_modules/.bin".to_string()]);
+
+            if uses_corepack {
+                step.add_variables(&HashMap::from([(
+                    "COREPACK_HOME".to_string(),
+                    COREPACK_HOME.to_string(),
+                )]));
+                step.add_command(Command::new_copy("package.json", "package.json"));
+                step.add_command(Command::new_exec_shell(
+                    "npm i -g corepack@latest && corepack enable && corepack prepare --activate",
+                ));
+            }
+
+            step.add_command(Command::new_exec(format!("mkdir -p {}", NODE_MODULES_CACHE)));
+        }
+
+        {
+            let needs_full_source = self.has_lifecycle_scripts();
+
+            if needs_full_source {
+                let local_layer = ctx.new_local_layer();
+                let step = Self::get_command_step(&mut ctx.steps, step_name);
+                step.add_input(local_layer);
+            } else {
+                let files = self.package_manager.supporting_install_files(&ctx.app);
+                let step = Self::get_command_step(&mut ctx.steps, step_name);
+                for file in &files {
+                    step.add_command(Command::new_copy(file.as_str(), file.as_str()));
+                }
+            }
+        }
+
+        {
+            let step = Self::get_command_step(&mut ctx.steps, step_name);
+            self.package_manager
+                .install_deps(&ctx.app, &mut ctx.caches, step, uses_corepack);
+        }
+
+        Ok(())
+    }
+
+    /// 生成构建命令（npm run build 等）
+    ///
+    /// 调用前需确保 step 已创建并已添加 install step layer input。
+    /// 可被 PHP/Ruby Provider 调用以支持双语言构建。
+    pub fn build_node(&self, ctx: &mut GenerateContext, step_name: &str) -> Result<()> {
+        let local_layer = ctx.new_local_layer();
+        let step = Self::get_command_step(&mut ctx.steps, step_name);
+        step.add_input(local_layer);
+
+        if let Some(ref pkg) = self.package_json {
+            if pkg.has_script("build") {
+                step.add_command(Command::new_exec(self.package_manager.run_cmd("build")));
+            }
+        }
+
+        let cache_name = ctx.caches.add_cache("node-modules", NODE_MODULES_CACHE);
+        let step = Self::get_command_step(&mut ctx.steps, step_name);
+        step.add_cache(&cache_name);
+
+        Ok(())
+    }
+
+    /// 生成依赖裁剪命令（移除 devDependencies）
+    ///
+    /// 用于双语言构建场景（PHP/Ruby + Node.js），始终裁剪不依赖 PRUNE_DEPS 环境变量。
+    pub fn prune_node_deps(&self, ctx: &mut GenerateContext, step_name: &str) -> Result<()> {
+        let prune_cmd = match self.package_manager {
+            PackageManagerKind::Npm => "npm prune --omit=dev --ignore-scripts",
+            PackageManagerKind::Pnpm => "pnpm prune --prod --ignore-scripts",
+            PackageManagerKind::Bun => {
+                "rm -rf node_modules && bun install --production --ignore-scripts"
+            }
+            PackageManagerKind::Yarn1 => "yarn install --production=true",
+            PackageManagerKind::YarnBerry => "yarn workspaces focus --production --all",
+        };
+        let step = Self::get_command_step(&mut ctx.steps, step_name);
+        step.add_command(Command::new_exec_shell(prune_cmd));
+        Ok(())
+    }
+}
+
+impl Provider for NodeProvider {
+    fn name(&self) -> &str {
+        "node"
+    }
+
+    fn detect(&self, app: &App, _env: &Environment) -> Result<bool> {
+        Ok(app.has_file("package.json"))
+    }
+
+    fn initialize(&mut self, ctx: &mut GenerateContext) -> Result<()> {
+        let package_json = self.get_package_json(&ctx.app)?;
+        self.package_manager = detect::detect_package_manager(&ctx.app, &package_json);
+        self.workspace_packages = workspace::resolve_workspace_packages(&ctx.app)?;
+        self.package_json = Some(package_json);
+        Ok(())
+    }
+
+    fn plan(&self, ctx: &mut GenerateContext) -> Result<()> {
+        if self.package_json.is_none() {
+            return Err(anyhow::anyhow!("package.json not found").into());
+        }
+
+        // 设置元数据
+        ctx.metadata.set("nodePackageManager", &self.package_manager.to_string());
+        ctx.metadata.set_bool("nodeUsesCorepack", self.uses_corepack());
+
+        let uses_corepack = self.uses_corepack();
+
+        // === 安装 mise 包 ===
+        self.install_mise_packages(ctx)?;
+
         // === install 步骤 ===
         let mise_step_name = ctx
             .mise_step_builder
@@ -298,78 +407,13 @@ impl Provider for NodeProvider {
         let install = ctx.new_command_step("install");
         install.add_input(Layer::new_step_layer(&mise_step_name, None));
 
-        // 设置 install 步骤环境变量和 secrets
-        {
-            let env_vars = self.get_node_env_vars();
-            let install = Self::get_command_step(&mut ctx.steps, "install");
-
-            install.add_variables(&env_vars);
-            install.secrets = vec![];
-            install.use_secrets_with_prefix(&ctx.env, "NODE");
-            install.use_secrets_with_prefix(&ctx.env, "NPM");
-            install.use_secrets_with_prefix(&ctx.env, "BUN");
-            install.use_secrets_with_prefix(&ctx.env, "PNPM");
-            install.use_secrets_with_prefix(&ctx.env, "YARN");
-            install.use_secrets_with_prefix(&ctx.env, "CI");
-            install.add_paths(&["/app/node_modules/.bin".to_string()]);
-
-            if uses_corepack {
-                install.add_variables(&HashMap::from([(
-                    "COREPACK_HOME".to_string(),
-                    COREPACK_HOME.to_string(),
-                )]));
-                install.add_command(Command::new_copy("package.json", "package.json"));
-                install.add_command(Command::new_exec_shell(
-                    "npm i -g corepack@latest && corepack enable && corepack prepare --activate",
-                ));
-            }
-
-            install.add_command(Command::new_exec(format!("mkdir -p {}", NODE_MODULES_CACHE)));
-        }
-
-        // 复制安装所需文件
-        {
-            let needs_full_source = self.has_lifecycle_scripts();
-
-            if needs_full_source {
-                let local_layer = ctx.new_local_layer();
-                let install = Self::get_command_step(&mut ctx.steps, "install");
-                install.add_input(local_layer);
-            } else {
-                let files = self.package_manager.supporting_install_files(&ctx.app);
-                let install = Self::get_command_step(&mut ctx.steps, "install");
-                for file in &files {
-                    install.add_command(Command::new_copy(file.as_str(), file.as_str()));
-                }
-            }
-        }
-
-        // 安装依赖
-        {
-            let install = Self::get_command_step(&mut ctx.steps, "install");
-            self.package_manager
-                .install_deps(&ctx.app, &mut ctx.caches, install, uses_corepack);
-        }
+        self.install_node_deps(ctx, "install")?;
 
         // === build 步骤 ===
         let build = ctx.new_command_step("build");
         build.add_input(Layer::new_step_layer("install", None));
 
-        {
-            let local_layer = ctx.new_local_layer();
-            let build = Self::get_command_step(&mut ctx.steps, "build");
-            build.add_input(local_layer);
-
-            if let Some(ref pkg) = self.package_json {
-                if pkg.has_script("build") {
-                    build.add_command(Command::new_exec(self.package_manager.run_cmd("build")));
-                }
-            }
-
-            let cache_name = ctx.caches.add_cache("node-modules", NODE_MODULES_CACHE);
-            let build = Self::get_command_step(&mut ctx.steps, "build");
-            build.add_cache(&cache_name);
-        }
+        self.build_node(ctx, "build")?;
 
         // === 框架检测 ===
         let pkg = self.package_json.as_ref().unwrap();

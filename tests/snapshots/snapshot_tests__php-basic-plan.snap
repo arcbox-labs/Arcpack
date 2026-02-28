@@ -61,7 +61,11 @@ expression: plan
     ],
     "startCommand": "/start-container.sh",
     "variables": {
+      "APP_DEBUG": "false",
       "APP_ENV": "production",
+      "LOG_CHANNEL": "stderr",
+      "LOG_LEVEL": "debug",
+      "PHP_INI_DIR": "/usr/local/etc/php",
       "SERVER_NAME": ":${PORT:-8080}"
     }
   }

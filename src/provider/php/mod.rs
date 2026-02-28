@@ -17,6 +17,7 @@ use crate::generate::command_step_builder::CommandStepBuilder;
 use crate::generate::GenerateContext;
 use crate::plan::{Command, Filter, Layer};
 use crate::provider::Provider;
+use crate::provider::node::NodeProvider;
 use crate::Result;
 
 /// 默认 PHP 版本
@@ -124,6 +125,18 @@ impl Provider for PhpProvider {
         ctx.metadata.set("phpRootDir", &self.root_dir);
 
         // === image 步骤：FrankenPHP 基础镜像 ===
+        // 预先收集 APT 包（避免 image_step 借用冲突）
+        let mut all_apt = vec![
+            "git".to_string(),
+            "zip".to_string(),
+            "unzip".to_string(),
+            "ca-certificates".to_string(),
+        ];
+        all_apt.extend(ctx.config.build_apt_packages.iter().cloned());
+        if let Some(ref deploy_cfg) = ctx.config.deploy {
+            all_apt.extend(deploy_cfg.apt_packages.iter().cloned());
+        }
+
         let php_version = self.php_version.clone();
         let image_step = ctx.new_image_step(
             "packages:php",
@@ -134,12 +147,7 @@ impl Provider for PhpProvider {
                 )
             }),
         );
-        image_step.apt_packages = vec![
-            "git".to_string(),
-            "zip".to_string(),
-            "unzip".to_string(),
-            "ca-certificates".to_string(),
-        ];
+        image_step.apt_packages = all_apt;
 
         // === extensions 步骤：安装 PHP 扩展 ===
         if let Some(ext_cmd) = extensions::install_command(&self.extensions) {
@@ -203,17 +211,49 @@ impl Provider for PhpProvider {
                 ));
             }
 
-            // Composer 缓存
-            let cache_name = ctx.caches.add_cache("composer-cache", "/root/.composer/cache");
+            // Composer 缓存（对齐 railpack：/opt/cache/composer）
+            let cache_name = ctx.caches.add_cache("composer-cache", "/opt/cache/composer");
             {
                 let install = Self::get_command_step(&mut ctx.steps, "install:composer");
                 install.add_cache(&cache_name);
             }
         }
 
+        // === Node.js 双语言构建 ===
+        let has_node = ctx.app.has_file("package.json");
+        if has_node {
+            let mut node = NodeProvider::new();
+            node.initialize(ctx)?;
+
+            // 注册 Node.js 到 mise
+            node.install_mise_packages(ctx)?;
+
+            // install:node 步骤
+            let prev_node_step = if ctx.app.has_file("composer.json") {
+                "install:composer"
+            } else {
+                "prepare"
+            };
+            let install_node = ctx.new_command_step("install:node");
+            install_node.add_input(Layer::new_step_layer(prev_node_step, None));
+            node.install_node_deps(ctx, "install:node")?;
+
+            // build:node 步骤
+            let build_node = ctx.new_command_step("build:node");
+            build_node.add_input(Layer::new_step_layer("install:node", None));
+            node.build_node(ctx, "build:node")?;
+
+            // prune:node 步骤（移除 devDependencies）
+            let prune_node = ctx.new_command_step("prune:node");
+            prune_node.add_input(Layer::new_step_layer("build:node", None));
+            node.prune_node_deps(ctx, "prune:node")?;
+        }
+
         // === build 步骤（Laravel 优化命令） ===
         if self.is_laravel {
-            let composer_step = if ctx.app.has_file("composer.json") {
+            let composer_step = if has_node {
+                "prune:node"
+            } else if ctx.app.has_file("composer.json") {
                 "install:composer"
             } else {
                 "prepare"
@@ -233,10 +273,18 @@ impl Provider for PhpProvider {
         ctx.deploy.start_cmd = Some("/start-container.sh".to_string());
 
         // Deploy 环境变量
-        let deploy_vars = HashMap::from([
+        let mut deploy_vars = HashMap::from([
             ("APP_ENV".to_string(), "production".to_string()),
             ("SERVER_NAME".to_string(), ":${PORT:-8080}".to_string()),
+            ("APP_DEBUG".to_string(), "false".to_string()),
+            ("LOG_CHANNEL".to_string(), "stderr".to_string()),
+            ("LOG_LEVEL".to_string(), "debug".to_string()),
+            ("PHP_INI_DIR".to_string(), "/usr/local/etc/php".to_string()),
         ]);
+        if self.is_laravel {
+            deploy_vars.insert("IS_LARAVEL".to_string(), "true".to_string());
+            deploy_vars.insert("OCTANE_SERVER".to_string(), "frankenphp".to_string());
+        }
         for (k, v) in deploy_vars {
             ctx.deploy.variables.insert(k, v);
         }
@@ -244,6 +292,8 @@ impl Provider for PhpProvider {
         // deploy inputs: image 层 + 最后步骤输出
         let last_step = if self.is_laravel {
             "build"
+        } else if has_node {
+            "prune:node"
         } else if ctx.app.has_file("composer.json") {
             "install:composer"
         } else {

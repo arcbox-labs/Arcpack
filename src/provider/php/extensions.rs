@@ -87,12 +87,33 @@ pub fn detect_extensions(
         }
     }
 
-    // 5. Redis 扩展
-    let needs_redis = env.get_variable("REDIS_HOST").is_some()
+    // 5. Redis 扩展（环境变量 + composer.json require 中的 redis/predis 包）
+    let mut needs_redis = env.get_variable("REDIS_HOST").is_some()
         || env.get_variable("REDIS_URL").is_some()
         || env.get_variable("CACHE_DRIVER").map_or(false, |v| v == "redis")
         || env.get_variable("SESSION_DRIVER").map_or(false, |v| v == "redis")
         || env.get_variable("QUEUE_CONNECTION").map_or(false, |v| v == "redis");
+
+    // 扫描 composer.json 中的 redis/predis 包依赖
+    if !needs_redis {
+        if let Ok(content) = app.read_file("composer.json") {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                let check_requires = |section: &str| -> bool {
+                    json.get(section)
+                        .and_then(|r| r.as_object())
+                        .map_or(false, |deps| {
+                            deps.keys().any(|k| {
+                                k == "predis/predis"
+                                    || k == "phpredis/phpredis"
+                                    || k == "ext-redis"
+                                    || k.starts_with("illuminate/redis")
+                            })
+                        })
+                };
+                needs_redis = check_requires("require") || check_requires("require-dev");
+            }
+        }
+    }
 
     if needs_redis && !extensions.contains(&"redis".to_string()) {
         extensions.push("redis".to_string());

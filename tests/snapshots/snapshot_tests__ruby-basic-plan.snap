@@ -13,8 +13,8 @@ expression: plan
       ],
       "commands": [
         {
-          "cmd": "sh -c 'apt-get update && apt-get install -y libffi-dev libjemalloc-dev libyaml-dev zlib1g-dev'",
-          "customName": "install apt packages: libffi-dev libjemalloc-dev libyaml-dev zlib1g-dev"
+          "cmd": "sh -c 'apt-get update && apt-get install -y cargo libffi-dev libjemalloc-dev libyaml-dev procps rustc zlib1g-dev'",
+          "customName": "install apt packages: cargo libffi-dev libjemalloc-dev libyaml-dev procps rustc zlib1g-dev"
         }
       ],
       "caches": [
@@ -165,7 +165,7 @@ expression: plan
       "BUNDLE_GEMFILE": "/app/Gemfile",
       "GEM_HOME": "/usr/local/bundle",
       "GEM_PATH": "/usr/local/bundle",
-      "LD_PRELOAD": "libjemalloc.so",
+      "LD_PRELOAD": "libjemalloc.so.2",
       "MALLOC_ARENA_MAX": "2",
       "RAILS_ENV": "production",
       "RAILS_LOG_TO_STDOUT": "enabled",

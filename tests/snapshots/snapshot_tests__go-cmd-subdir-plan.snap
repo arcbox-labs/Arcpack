@@ -22,11 +22,11 @@ expression: plan
         },
         {
           "cmd": "mise install",
-          "customName": "install mise packages: dotnet"
+          "customName": "install mise packages: go"
         }
       ],
       "assets": {
-        "mise.toml": "[tools.dotnet]\nversion = \"8.0.0.0\"\n"
+        "mise.toml": "[tools.go]\nversion = \"1.22.0.0\"\n"
       },
       "variables": {
         "MISE_CACHE_DIR": "/mise/cache",
@@ -49,19 +49,24 @@ expression: plan
       ],
       "commands": [
         {
-          "src": "MyApp.csproj",
-          "dest": "MyApp.csproj"
+          "path": "/go/bin"
         },
         {
-          "cmd": "dotnet restore"
+          "src": "go.mod",
+          "dest": "go.mod"
+        },
+        {
+          "cmd": "go mod download"
         }
       ],
       "secrets": [
         "*"
       ],
-      "caches": [
-        "nuget-packages"
-      ]
+      "variables": {
+        "CGO_ENABLED": "0",
+        "GOBIN": "/go/bin",
+        "GOPATH": "/go"
+      }
     },
     {
       "name": "build",
@@ -78,11 +83,14 @@ expression: plan
       ],
       "commands": [
         {
-          "cmd": "dotnet publish --no-restore -c Release -o out"
+          "cmd": "go build -ldflags=\"-w -s\" -o out ."
         }
       ],
       "secrets": [
         "*"
+      ],
+      "caches": [
+        "go-build"
       ]
     },
     {
@@ -94,8 +102,8 @@ expression: plan
       ],
       "commands": [
         {
-          "cmd": "sh -c 'apt-get update && apt-get install -y libicu-dev'",
-          "customName": "install apt packages: libicu-dev"
+          "cmd": "sh -c 'apt-get update && apt-get install -y tzdata'",
+          "customName": "install apt packages: tzdata"
         }
       ],
       "caches": [
@@ -105,8 +113,8 @@ expression: plan
     }
   ],
   "caches": {
-    "nuget-packages": {
-      "directory": "/root/.nuget/packages",
+    "go-build": {
+      "directory": "/root/.cache/go-build",
       "type": "shared"
     }
   },
@@ -117,27 +125,11 @@ expression: plan
     "inputs": [
       {
         "include": [
-          "/mise/shims",
-          "/mise/installs",
-          "/usr/local/bin/mise",
-          "/etc/mise/config.toml",
-          "/root/.local/state/mise"
-        ],
-        "step": "packages:mise"
-      },
-      {
-        "include": [
           "."
         ],
         "step": "build"
       }
     ],
-    "startCommand": "ASPNETCORE_URLS=http://0.0.0.0:${PORT:-3000} ./out/MyApp",
-    "variables": {
-      "ASPNETCORE_CONTENTROOT": "/app/out",
-      "ASPNETCORE_ENVIRONMENT": "Production",
-      "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
-      "DOTNET_NOLOGO": "1"
-    }
+    "startCommand": "./out"
   }
 }

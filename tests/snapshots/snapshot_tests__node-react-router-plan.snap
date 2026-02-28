@@ -22,11 +22,11 @@ expression: plan
         },
         {
           "cmd": "mise install",
-          "customName": "install mise packages: dotnet"
+          "customName": "install mise packages: node"
         }
       ],
       "assets": {
-        "mise.toml": "[tools.dotnet]\nversion = \"8.0.0.0\"\n"
+        "mise.toml": "[tools.node]\nversion = \"22.0.0\"\n"
       },
       "variables": {
         "MISE_CACHE_DIR": "/mise/cache",
@@ -49,18 +49,32 @@ expression: plan
       ],
       "commands": [
         {
-          "src": "MyApp.csproj",
-          "dest": "MyApp.csproj"
+          "path": "/app/node_modules/.bin"
         },
         {
-          "cmd": "dotnet restore"
+          "cmd": "mkdir -p /app/node_modules/.cache"
+        },
+        {
+          "src": "package-lock.json",
+          "dest": "package-lock.json"
+        },
+        {
+          "src": "package.json",
+          "dest": "package.json"
+        },
+        {
+          "cmd": "npm ci"
         }
       ],
-      "secrets": [
-        "*"
-      ],
+      "variables": {
+        "CI": "true",
+        "NODE_ENV": "production",
+        "NPM_CONFIG_FUND": "false",
+        "NPM_CONFIG_PRODUCTION": "false",
+        "NPM_CONFIG_UPDATE_NOTIFIER": "false"
+      },
       "caches": [
-        "nuget-packages"
+        "npm-install"
       ]
     },
     {
@@ -78,11 +92,34 @@ expression: plan
       ],
       "commands": [
         {
-          "cmd": "dotnet publish --no-restore -c Release -o out"
+          "cmd": "npm run build"
         }
       ],
       "secrets": [
         "*"
+      ],
+      "caches": [
+        "node-modules",
+        "react-router"
+      ]
+    },
+    {
+      "name": "packages:caddy",
+      "inputs": [
+        {
+          "image": "ghcr.io/railwayapp/railpack-builder:latest"
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "mise install-into caddy@2.0.0 /arcpack/caddy"
+        },
+        {
+          "path": "/arcpack/caddy"
+        },
+        {
+          "path": "/arcpack/caddy/bin"
+        }
       ]
     },
     {
@@ -94,8 +131,8 @@ expression: plan
       ],
       "commands": [
         {
-          "cmd": "sh -c 'apt-get update && apt-get install -y libicu-dev'",
-          "customName": "install apt packages: libicu-dev"
+          "cmd": "sh -c 'apt-get update && apt-get install -y libatomic1'",
+          "customName": "install apt packages: libatomic1"
         }
       ],
       "caches": [
@@ -105,8 +142,16 @@ expression: plan
     }
   ],
   "caches": {
-    "nuget-packages": {
-      "directory": "/root/.nuget/packages",
+    "node-modules": {
+      "directory": "/app/node_modules/.cache",
+      "type": "shared"
+    },
+    "npm-install": {
+      "directory": "/root/.npm",
+      "type": "shared"
+    },
+    "react-router": {
+      "directory": "/app/.react-router",
       "type": "shared"
     }
   },
@@ -117,27 +162,28 @@ expression: plan
     "inputs": [
       {
         "include": [
-          "/mise/shims",
-          "/mise/installs",
-          "/usr/local/bin/mise",
-          "/etc/mise/config.toml",
-          "/root/.local/state/mise"
+          "/arcpack/caddy"
         ],
-        "step": "packages:mise"
+        "step": "packages:caddy"
       },
       {
         "include": [
-          "."
+          "build/client"
         ],
         "step": "build"
       }
     ],
-    "startCommand": "ASPNETCORE_URLS=http://0.0.0.0:${PORT:-3000} ./out/MyApp",
+    "startCommand": "caddy run --config /app/Caddyfile --adapter caddyfile",
     "variables": {
-      "ASPNETCORE_CONTENTROOT": "/app/out",
-      "ASPNETCORE_ENVIRONMENT": "Production",
-      "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
-      "DOTNET_NOLOGO": "1"
-    }
+      "CI": "true",
+      "NODE_ENV": "production",
+      "NPM_CONFIG_FUND": "false",
+      "NPM_CONFIG_PRODUCTION": "false",
+      "NPM_CONFIG_UPDATE_NOTIFIER": "false"
+    },
+    "paths": [
+      "/arcpack/caddy",
+      "/arcpack/caddy/bin"
+    ]
   }
 }

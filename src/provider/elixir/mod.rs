@@ -14,6 +14,7 @@ use crate::generate::mise_step_builder::{self, MiseStepBuilder};
 use crate::generate::GenerateContext;
 use crate::plan::{Command, Filter, Layer};
 use crate::provider::Provider;
+use crate::provider::node::NodeProvider;
 use crate::Result;
 
 /// 默认版本
@@ -144,6 +145,11 @@ impl Provider for ElixirProvider {
     }
 
     fn initialize(&mut self, ctx: &mut GenerateContext) -> Result<()> {
+        // mix.lock 缺失警告
+        if !ctx.app.has_file("mix.lock") {
+            ctx.logs.warn("mix.lock not found. It is recommended to commit mix.lock to version control for reproducible builds.");
+        }
+
         // 从 mix.exs 解析
         if let Ok(content) = ctx.app.read_file("mix.exs") {
             self.app_name = Self::parse_app_name(&content);
@@ -248,6 +254,9 @@ impl Provider for ElixirProvider {
                 ("MIX_HOME".to_string(), "/root/.mix".to_string()),
             ]));
 
+            // 预创建构建目录
+            install.add_command(Command::new_exec("mkdir -p config deps _build"));
+
             install.add_command(Command::new_exec("mix local.hex --force"));
             install.add_command(Command::new_exec("mix local.rebar --force"));
 
@@ -271,9 +280,55 @@ impl Provider for ElixirProvider {
             install.use_secrets_with_prefix(&ctx.env, "OTP");
         }
 
+        // === Node.js 集成（assets/ 子目录）===
+        let has_assets_node = ctx.app.has_file("assets/package.json");
+        if has_assets_node {
+            // 注册 Node.js 到 mise
+            // TODO: NodeProvider::new() 未调用 initialize()，不会检测 Bun 等替代包管理器；
+            //       当前仅用于 mise 注册和依赖安装，影响有限，后续如需 Bun 支持需补充初始化。
+            let node = NodeProvider::new();
+            node.install_mise_packages(ctx)?;
+
+            // install:node 步骤
+            let install_node = ctx.new_command_step("install:node");
+            install_node.add_input(Layer::new_step_layer("install", None));
+            {
+                let has_npm_lock = ctx.app.has_file("assets/package-lock.json");
+                let has_yarn_lock = ctx.app.has_file("assets/yarn.lock");
+                let step = Self::get_command_step(&mut ctx.steps, "install:node");
+
+                // 复制 assets 目录的 Node.js 文件
+                step.add_command(Command::new_copy("assets/package.json", "assets/package.json"));
+                if has_npm_lock {
+                    step.add_command(Command::new_copy(
+                        "assets/package-lock.json",
+                        "assets/package-lock.json",
+                    ));
+                }
+                if has_yarn_lock {
+                    step.add_command(Command::new_copy(
+                        "assets/yarn.lock",
+                        "assets/yarn.lock",
+                    ));
+                }
+
+                // 在 assets/ 子目录安装 Node.js 依赖
+                if has_npm_lock {
+                    step.add_command(Command::new_exec_shell("cd assets && npm ci"));
+                } else if has_yarn_lock {
+                    step.add_command(Command::new_exec_shell(
+                        "cd assets && yarn install --frozen-lockfile",
+                    ));
+                } else {
+                    step.add_command(Command::new_exec_shell("cd assets && npm install"));
+                }
+            }
+        }
+
         // === build 步骤 ===
+        let build_input = if has_assets_node { "install:node" } else { "install" };
         let build = ctx.new_command_step("build");
-        build.add_input(Layer::new_step_layer("install", None));
+        build.add_input(Layer::new_step_layer(build_input, None));
         {
             let local_layer = ctx.new_local_layer();
             let build = Self::get_command_step(&mut ctx.steps, "build");
@@ -287,9 +342,15 @@ impl Provider for ElixirProvider {
             // 编译
             build.add_command(Command::new_exec("mix compile"));
 
-            // Phoenix 资产部署
-            if self.is_phoenix && self.has_assets {
-                build.add_command(Command::new_exec("mix assets.deploy"));
+            // Phoenix 资产部署（检查 mix.exs 中是否定义了对应别名）
+            if self.is_phoenix {
+                if let Ok(mix_content) = ctx.app.read_file("mix.exs") {
+                    for alias in ["assets.setup", "assets.deploy", "ecto.deploy"] {
+                        if mix_content.contains(alias) {
+                            build.add_command(Command::new_exec(format!("mix {alias}")));
+                        }
+                    }
+                }
             }
 
             // Mix release
@@ -318,8 +379,11 @@ impl Provider for ElixirProvider {
         // Deploy 环境变量
         let deploy_vars = HashMap::from([
             ("LANG".to_string(), "en_US.UTF-8".to_string()),
+            ("LANGUAGE".to_string(), "en_US:en".to_string()),
+            ("LC_ALL".to_string(), "en_US.UTF-8".to_string()),
             ("MIX_ENV".to_string(), "prod".to_string()),
             ("MIX_HOME".to_string(), "/root/.mix".to_string()),
+            ("MIX_ARCHIVES".to_string(), "/root/.mix/archives".to_string()),
             (
                 "ELIXIR_ERL_OPTIONS".to_string(),
                 "+fnu".to_string(),

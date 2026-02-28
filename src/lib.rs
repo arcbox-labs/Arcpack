@@ -116,7 +116,13 @@ pub fn generate_build_plan(
     let app = App::new(source)?;
     let env = Environment::new(env_vars);
     let options_config = Config::from_options(&options.build_command, &options.start_command);
-    let config = Config::load(&app, &env, options_config, &options.config_file_path)?;
+
+    // 配置文件路径：CLI --config-file > ARCPACK_CONFIG_FILE 环境变量 > 默认 arcpack.json
+    let config_file_path = options
+        .config_file_path
+        .clone()
+        .or_else(|| env.get_config_variable("CONFIG_FILE").0);
+    let config = Config::load(&app, &env, options_config, &config_file_path)?;
 
     // 检测 Provider
     let mut provider_to_use = detect_provider(&app, &env, &config)?;

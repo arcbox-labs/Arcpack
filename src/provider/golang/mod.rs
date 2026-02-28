@@ -186,6 +186,15 @@ impl Provider for GoProvider {
         ctx.metadata.set_bool("goRootFile", self.has_root_go_files);
         ctx.metadata.set_bool("goCGO", self.cgo_enabled);
 
+        // Gin 框架检测
+        if self.has_go_mod {
+            if let Ok(content) = ctx.app.read_file("go.mod") {
+                if content.contains("github.com/gin-gonic/gin") {
+                    ctx.metadata.set_bool("goGin", true);
+                }
+            }
+        }
+
         // === mise 步骤：安装 Go ===
         Self::ensure_mise_step_builder(ctx);
 

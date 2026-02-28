@@ -36,13 +36,29 @@ impl DotnetProvider {
         }
     }
 
-    /// 从 TargetFramework 提取 .NET 版本
+    /// 从 TargetFramework 或 TargetFrameworks（复数）提取 .NET 版本
     fn parse_target_framework(content: &str) -> Option<String> {
+        // 单一目标框架
         let re = Regex::new(r"<TargetFramework>(?:net|netcoreapp)(\d+\.\d+)</TargetFramework>")
             .ok()?;
-        re.captures(content)
-            .and_then(|caps| caps.get(1))
-            .map(|m| m.as_str().to_string())
+        if let Some(caps) = re.captures(content) {
+            return caps.get(1).map(|m| m.as_str().to_string());
+        }
+
+        // 多目标框架（分号分隔，取第一个）
+        let re_plural =
+            Regex::new(r"<TargetFrameworks>([^<]+)</TargetFrameworks>").ok()?;
+        if let Some(caps) = re_plural.captures(content) {
+            let frameworks = caps.get(1)?.as_str();
+            let first = frameworks.split(';').next()?;
+            let re_ver = Regex::new(r"(?:net|netcoreapp)(\d+\.\d+)").ok()?;
+            return re_ver
+                .captures(first)
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str().to_string());
+        }
+
+        None
     }
 
     /// 从 global.json 解析 SDK 版本
@@ -227,6 +243,10 @@ impl Provider for DotnetProvider {
         ctx.deploy.variables.insert(
             "DOTNET_NOLOGO".to_string(),
             "1".to_string(),
+        );
+        ctx.deploy.variables.insert(
+            "ASPNETCORE_CONTENTROOT".to_string(),
+            "/app/out".to_string(),
         );
 
         // 运行时 APT 包

@@ -13,7 +13,7 @@ use crate::buildkit::grpc::channel::create_channel;
 use crate::buildkit::grpc::progress::{
     parse_status_response, render_plain, ProgressMode,
 };
-use crate::buildkit::grpc::solve::{self, ExportConfig, SolveConfig};
+use crate::buildkit::grpc::solve::{self, CacheConfig, ExportConfig, SolveConfig};
 use crate::buildkit::image::ImageConfig;
 use crate::buildkit::proto::control::control_client::ControlClient;
 use crate::buildkit::proto::control::StatusRequest;
@@ -41,6 +41,10 @@ pub struct GrpcBuildRequest {
     pub local_dirs: HashMap<String, PathBuf>,
     /// 进度渲染模式
     pub progress_mode: ProgressMode,
+    /// 缓存导入配置
+    pub cache_imports: Vec<CacheConfig>,
+    /// 缓存导出配置
+    pub cache_exports: Vec<CacheConfig>,
 }
 
 impl GrpcBuildKitClient {
@@ -110,6 +114,8 @@ impl GrpcBuildKitClient {
             exporter: request.export,
             session_id: Some(session_id.clone()),
             frontend_attrs,
+            cache_imports: request.cache_imports,
+            cache_exports: request.cache_exports,
         };
         let solve_request = solve::build_solve_request(&config)?;
         let progress_ref = solve_request.r#ref.clone();

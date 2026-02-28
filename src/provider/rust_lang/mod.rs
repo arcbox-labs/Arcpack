@@ -319,6 +319,29 @@ impl Provider for RustProvider {
                     )));
                 }
             }
+
+            // src/bin/*.rs 额外二进制检测
+            if let Ok(bin_files) = ctx.app.find_files("src/bin/*.rs") {
+                let (target_dir, ext) = if self.is_wasm {
+                    ("wasm32-wasi/release", ".wasm")
+                } else {
+                    ("release", "")
+                };
+                for bin_file in &bin_files {
+                    let bin_name = std::path::Path::new(bin_file)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("");
+                    // 跳过与主二进制同名的
+                    if !bin_name.is_empty()
+                        && self.binary_name.as_deref() != Some(bin_name)
+                    {
+                        build.add_command(Command::new_exec(format!(
+                            "cp target/{target_dir}/{bin_name}{ext} bin/"
+                        )));
+                    }
+                }
+            }
         }
 
         // 缓存

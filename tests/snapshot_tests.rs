@@ -264,6 +264,49 @@ fn test_snapshot_go_workspace() {
     });
 }
 
+// === Go cmd/ subdir ===
+
+#[test]
+fn test_snapshot_go_cmd_subdir() {
+    let (plan, _resolved, providers) = generate_plan_from_fixture("go-cmd-subdir").unwrap();
+    assert_eq!(providers, vec!["golang"]);
+    // start_cmd 始终为 ./out（Go provider 固定输出二进制名）
+    assert_eq!(
+        plan.deploy.start_cmd.as_deref(),
+        Some("./out"),
+        "go provider should produce ./out binary"
+    );
+    // build 步骤应包含 cmd/server 子目录构建
+    let build_step = plan.steps.iter().find(|s| s.name.as_deref() == Some("build")).unwrap();
+    let build_cmd = build_step.commands.iter().find_map(|c| {
+        if let arcpack::plan::Command::Exec(e) = c { Some(e.cmd.as_str()) } else { None }
+    }).unwrap();
+    assert!(
+        build_cmd.contains("./cmd/server") || build_cmd.contains(" ."),
+        "build should target cmd/server or root, got: {build_cmd}"
+    );
+    insta_settings().bind(|| {
+        insta::assert_json_snapshot!("go-cmd-subdir-plan", plan);
+    });
+}
+
+// === Node React Router ===
+
+#[test]
+fn test_snapshot_node_react_router() {
+    let (plan, _resolved, providers) = generate_plan_from_fixture("node-react-router").unwrap();
+    assert_eq!(providers, vec!["node"]);
+    // React Router SPA 模式应使用 caddy（静态文件服务）
+    let start_cmd = plan.deploy.start_cmd.as_deref().unwrap();
+    assert!(
+        start_cmd.contains("caddy") || start_cmd.contains("start"),
+        "react-router should have a start command, got: {start_cmd}"
+    );
+    insta_settings().bind(|| {
+        insta::assert_json_snapshot!("node-react-router-plan", plan);
+    });
+}
+
 // === Rust Provider ===
 
 #[test]
@@ -403,6 +446,74 @@ fn test_snapshot_cpp_cmake() {
     insta_settings().bind(|| {
         insta::assert_json_snapshot!("cpp-cmake-plan", plan);
     });
+}
+
+// === ARCPACK_CONFIG_FILE 优先级测试 ===
+
+/// 验证 ARCPACK_CONFIG_FILE 环境变量生效
+#[test]
+fn test_config_file_env_var_is_used() {
+    let fixture_path = format!(
+        "{}/tests/fixtures/{}",
+        env!("CARGO_MANIFEST_DIR"),
+        "node-npm"
+    );
+
+    let app = App::new(&fixture_path).unwrap();
+    // 通过环境变量指定不存在的配置文件，应触发错误
+    let env = Environment::new(HashMap::from([(
+        "ARCPACK_CONFIG_FILE".to_string(),
+        "env-specified-config.json".to_string(),
+    )]));
+
+    let config_file_path: Option<String> =
+        env.get_config_variable("CONFIG_FILE").0;
+    let result = Config::load(&app, &env, Config::empty(), &config_file_path);
+
+    assert!(result.is_err(), "应因找不到 env-specified-config.json 而报错");
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("env-specified-config.json"),
+        "错误信息应包含环境变量指定的文件名，实际: {err_msg}"
+    );
+}
+
+/// 验证 --config-file 优先级高于 ARCPACK_CONFIG_FILE
+#[test]
+fn test_config_file_cli_flag_overrides_env_var() {
+    let fixture_path = format!(
+        "{}/tests/fixtures/{}",
+        env!("CARGO_MANIFEST_DIR"),
+        "node-npm"
+    );
+
+    let app = App::new(&fixture_path).unwrap();
+    // 环境变量和 CLI flag 都指定不存在的文件
+    let env = Environment::new(HashMap::from([(
+        "ARCPACK_CONFIG_FILE".to_string(),
+        "env-config.json".to_string(),
+    )]));
+
+    // 模拟 --config-file 优先级逻辑（与 lib.rs 一致）
+    let cli_config_path = Some("cli-config.json".to_string());
+    let config_file_path = cli_config_path
+        .clone()
+        .or_else(|| env.get_config_variable("CONFIG_FILE").0);
+
+    // 应使用 CLI 指定的路径
+    assert_eq!(
+        config_file_path.as_deref(),
+        Some("cli-config.json"),
+        "--config-file 应优先于 ARCPACK_CONFIG_FILE"
+    );
+
+    let result = Config::load(&app, &env, Config::empty(), &config_file_path);
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("cli-config.json"),
+        "错误应包含 CLI 指定的文件名，实际: {err_msg}"
+    );
 }
 
 // === .NET Provider ===

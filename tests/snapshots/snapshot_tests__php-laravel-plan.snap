@@ -102,6 +102,9 @@ expression: plan
       ],
       "commands": [
         {
+          "cmd": "mkdir -p storage/framework/{sessions,views,cache,testing} storage/logs bootstrap/cache && chmod -R ug+rw storage"
+        },
+        {
           "cmd": "php artisan config:cache"
         },
         {
@@ -121,7 +124,7 @@ expression: plan
   ],
   "caches": {
     "composer-cache": {
-      "directory": "/root/.composer/cache",
+      "directory": "/opt/cache/composer",
       "type": "shared"
     }
   },
@@ -139,7 +142,13 @@ expression: plan
     ],
     "startCommand": "/start-container.sh",
     "variables": {
+      "APP_DEBUG": "false",
       "APP_ENV": "production",
+      "IS_LARAVEL": "true",
+      "LOG_CHANNEL": "stderr",
+      "LOG_LEVEL": "debug",
+      "OCTANE_SERVER": "frankenphp",
+      "PHP_INI_DIR": "/usr/local/etc/php",
       "SERVER_NAME": ":${PORT:-8080}"
     }
   }

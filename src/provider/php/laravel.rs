@@ -23,6 +23,12 @@ pub fn get_root_dir(env: &Environment) -> String {
 pub fn get_build_commands(env: &Environment) -> Vec<String> {
     let mut commands = Vec::new();
 
+    // storage 目录初始化（确保运行时目录存在且可写）
+    commands.push(
+        "mkdir -p storage/framework/{sessions,views,cache,testing} storage/logs bootstrap/cache && chmod -R ug+rw storage"
+            .to_string(),
+    );
+
     // 缓存配置
     commands.push("php artisan config:cache".to_string());
     commands.push("php artisan event:cache".to_string());
