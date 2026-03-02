@@ -1,143 +1,143 @@
 # Arcpack
 
-零配置应用构建器 — 自动检测源码的语言/框架 → 生成构建计划 → 转译为 LLB → 通过 BuildKit 输出 OCI 镜像，无需编写 Dockerfile。
+Zero-configuration application builder — automatically detects source code language/framework → generates a build plan → transpiles to LLB → outputs OCI images via BuildKit, no Dockerfile required.
 
-ArcBox PaaS 平台的核心构建组件。
+Core build component of the ArcBox PaaS platform.
 
-## 核心架构
+## Core Architecture
 
 ```
-源码 → Provider 检测 → BuildPlan → LLB 转译 → BuildKit 构建 → OCI 镜像
+Source Code → Provider Detection → BuildPlan → LLB Transpilation → BuildKit Build → OCI Image
 ```
 
-- **Source Analyzer** — 读取源码目录，提供文件系统抽象（glob 缓存 + JSONC 解析）
-- **Provider** — 语言/框架检测器，多个可同时匹配（detect → initialize → plan → cleanse_plan）
-- **BuildPlan** — 聚合所有 Provider 输出的构建蓝图（Step DAG + Layer + Filter + Cache + Command）
-- **LLB Generator** — 将 BuildPlan 转译为 BuildKit DAG，实施 OCI 分层策略
-- **BuildKit Client** — gRPC 通信（Session + FileSend + Secrets），支持子进程/外部 daemon
+- **Source Analyzer** — Reads source directories, provides filesystem abstraction (glob cache + JSONC parsing)
+- **Provider** — Language/framework detectors, multiple can match simultaneously (detect → initialize → plan → cleanse_plan)
+- **BuildPlan** — Aggregates all Provider outputs into a build blueprint (Step DAG + Layer + Filter + Cache + Command)
+- **LLB Generator** — Transpiles BuildPlan into a BuildKit DAG, implementing OCI layering strategy
+- **BuildKit Client** — gRPC communication (Session + FileSend + Secrets), supports subprocess/external daemon
 
-## 快速开始
+## Quick Start
 
 ```bash
-# 生成构建计划（预览）
+# Generate build plan (preview)
 arcpack plan /path/to/your/app
 
-# 完整构建 → OCI 镜像
+# Full build → OCI image
 arcpack build /path/to/your/app
 
-# 查看构建元数据
+# View build metadata
 arcpack info /path/to/your/app
 
-# 输出 arcpack.json JSON Schema
+# Output arcpack.json JSON Schema
 arcpack schema
 ```
 
 ## Roadmap
 
-### 核心流水线
+### Core Pipeline
 
-| 状态 | 功能 | 说明 |
-|------|------|------|
-| ✅ | Source Analyzer | App 文件系统抽象 + glob 缓存 + JSONC 解析 |
-| ✅ | Provider 框架 | detect → initialize → plan → cleanse_plan 生命周期 |
-| ✅ | BuildPlan 数据结构 | Step DAG、Layer、Filter、Cache、Command |
-| ✅ | Plan 验证 | commands / step-inputs / deploy-base / start-command |
-| ✅ | DAG 拓扑排序 | 传递依赖消除 |
-| ✅ | LLB 原语 | exec / file / merge / source / terminal |
-| ✅ | BuildPlan → LLB 转换 | 直接转换路径 |
-| ✅ | BuildPlan → Dockerfile | 兼容路径 |
-| ✅ | BuildKit gRPC 客户端 | Session + FileSend + Secrets |
-| ✅ | buildkitd 子进程管理 | SubprocessDaemonManager |
-| ✅ | 外部 buildkitd 连接 | ExternalDaemonManager via BUILDKIT_HOST |
+| Status | Feature | Description |
+|--------|---------|-------------|
+| ✅ | Source Analyzer | App filesystem abstraction + glob cache + JSONC parsing |
+| ✅ | Provider Framework | detect → initialize → plan → cleanse_plan lifecycle |
+| ✅ | BuildPlan Data Structure | Step DAG, Layer, Filter, Cache, Command |
+| ✅ | Plan Validation | commands / step-inputs / deploy-base / start-command |
+| ✅ | DAG Topological Sort | Transitive dependency elimination |
+| ✅ | LLB Primitives | exec / file / merge / source / terminal |
+| ✅ | BuildPlan → LLB Conversion | Direct conversion path |
+| ✅ | BuildPlan → Dockerfile | Compatibility path |
+| ✅ | BuildKit gRPC Client | Session + FileSend + Secrets |
+| ✅ | buildkitd Subprocess Management | SubprocessDaemonManager |
+| ✅ | External buildkitd Connection | ExternalDaemonManager via BUILDKIT_HOST |
 
-### CLI 命令
+### CLI Commands
 
-| 状态 | 命令 | 说明 |
-|------|------|------|
-| ✅ | `arcpack plan` | 生成 BuildPlan JSON |
-| ✅ | `arcpack build` | 完整构建 → OCI 镜像 |
-| ✅ | `arcpack info` | 构建元数据输出 |
+| Status | Command | Description |
+|--------|---------|-------------|
+| ✅ | `arcpack plan` | Generate BuildPlan JSON |
+| ✅ | `arcpack build` | Full build → OCI image |
+| ✅ | `arcpack info` | Build metadata output |
 | ✅ | `arcpack schema` | arcpack.json JSON Schema |
-| ✅ | `arcpack prepare` | 写入 plan + info JSON 文件 |
-| ✅ | `arcpack frontend` | BuildKit frontend 模式 |
+| ✅ | `arcpack prepare` | Write plan + info JSON files |
+| ✅ | `arcpack frontend` | BuildKit frontend mode |
 
-### Provider / 处理器（15 个）
+### Providers (15)
 
-| 状态 | Provider | 说明 |
-|------|----------|------|
-| ✅ | Node.js | npm/pnpm/yarn/bun + 9 个框架 + SPA + workspace + Corepack |
+| Status | Provider | Description |
+|--------|----------|-------------|
+| ✅ | Node.js | npm/pnpm/yarn/bun + 9 frameworks + SPA + workspace + Corepack |
 | ✅ | Python | pip/uv/poetry/pdm/pipenv + Django/FastAPI/Flask/FastHTML |
-| ✅ | Go | go modules + workspace + CGO 检测 + Gin 元数据 |
-| ✅ | Rust | Cargo + workspace + WASM 检测 + 7 级版本解析 |
-| ✅ | Java | Maven/Gradle + Spring Boot + wrapper 支持 |
-| ✅ | PHP | Composer + Laravel + FrankenPHP + PHP 扩展检测 + Node.js 双语构建 |
-| ✅ | Ruby | Bundler + Rails + YJIT + Node.js/ExecJS 集成 |
-| ✅ | Elixir | Mix/Hex + Phoenix + Erlang 版本兼容映射 + Node.js assets |
+| ✅ | Go | go modules + workspace + CGO detection + Gin metadata |
+| ✅ | Rust | Cargo + workspace + WASM detection + 7-level version resolution |
+| ✅ | Java | Maven/Gradle + Spring Boot + wrapper support |
+| ✅ | PHP | Composer + Laravel + FrankenPHP + PHP extension detection + Node.js dual-language build |
+| ✅ | Ruby | Bundler + Rails + YJIT + Node.js/ExecJS integration |
+| ✅ | Elixir | Mix/Hex + Phoenix + Erlang version compatibility mapping + Node.js assets |
 | ✅ | Gleam | gleam.toml + Erlang shipment |
-| ✅ | Deno | deno.json/deno.jsonc + 主文件检测 |
-| ✅ | .NET | NuGet + dotnet publish + 多目标框架 |
+| ✅ | Deno | deno.json/deno.jsonc + entrypoint detection |
+| ✅ | .NET | NuGet + dotnet publish + multi-target framework |
 | ✅ | C++ | CMake/Meson + Ninja |
-| ✅ | 静态网站 | Staticfile/public/index.html + Caddy |
-| ✅ | Shell | shebang 解析 + 多 shell 支持 |
-| ✅ | Procfile | 后处理器，web > worker > first |
+| ✅ | Static Sites | Staticfile/public/index.html + Caddy |
+| ✅ | Shell | shebang parsing + multi-shell support |
+| ✅ | Procfile | Post-processor, web > worker > first |
 
-### 配置系统
+### Configuration System
 
-| 状态 | 功能 | 说明 |
-|------|------|------|
-| ✅ | arcpack.json | 项目配置文件 |
-| ✅ | 环境变量覆盖 | ARCPACK_* 前缀 |
-| ✅ | JSON Schema 生成 | schemars |
-| ✅ | .dockerignore 支持 | 构建上下文过滤 |
-| ✅ | Secrets 管理 | SHA256 hash + GITHUB_TOKEN 自动注入 |
+| Status | Feature | Description |
+|--------|---------|-------------|
+| ✅ | arcpack.json | Project configuration file |
+| ✅ | Environment Variable Overrides | ARCPACK_* prefix |
+| ✅ | JSON Schema Generation | schemars |
+| ✅ | .dockerignore Support | Build context filtering |
+| ✅ | Secrets Management | SHA256 hash + GITHUB_TOKEN auto-injection |
 
-### 工具集成
+### Tool Integration
 
-| 状态 | 功能 | 说明 |
-|------|------|------|
-| ✅ | mise | 版本管理器集成 |
-| ✅ | Caddy | Web 服务器（SPA + 静态网站） |
-| ✅ | BuildKit 缓存 | cache-import / cache-export / cache-key |
+| Status | Feature | Description |
+|--------|---------|-------------|
+| ✅ | mise | Version manager integration |
+| ✅ | Caddy | Web server (SPA + static sites) |
+| ✅ | BuildKit Cache | cache-import / cache-export / cache-key |
 
-### 测试
+### Testing
 
-| 状态 | 功能 | 说明 |
-|------|------|------|
-| ✅ | 单元测试 | 80+ 个 `#[cfg(test)]` 模块 |
-| ✅ | insta 快照测试 | 32 个 fixture 快照 |
-| ✅ | 集成测试框架 | tests/ 目录 |
-| 🚧 | 集成测试覆盖 | 仅 8 个 Node.js fixture 有 test.json（共 33 个 fixture） |
+| Status | Feature | Description |
+|--------|---------|-------------|
+| ✅ | Unit Tests | 80+ `#[cfg(test)]` modules |
+| ✅ | insta Snapshot Tests | 32 fixture snapshots |
+| ✅ | Integration Test Framework | tests/ directory |
+| 🚧 | Integration Test Coverage | Only 8 Node.js fixtures have test.json (33 fixtures total) |
 
-### 待实现功能（P0 对齐项）
+### Pending Features (P0 Alignment Items)
 
-| 状态 | 编号 | 说明 |
-|------|------|------|
-| ✅ | P0-01 | Frontend plan-file 读取路径（有 filename 时读 plan 文件，未传时回退检测） |
-| ⬜ | P0-02 | docker-container:// BuildKit 连接协议 |
-| ✅ | P0-03a | 默认镜像命名（从源码目录名派生） |
-| ⬜ | P0-03b | docker load 导出 |
-| 🚧 | P0-05 | CLI 语义对齐：--env bare KEY、--error-missing-start flag |
-| 🚧 | P0-06 | ARCPACK_CONFIG_FILE 已接入配置优先级，railpack.json 兼容待做 |
-| ⬜ | P0-08 | 回归测试补强：fixture 补充到 railpack 级别 104 个 |
-| ⬜ | P0-09 | CI/CD（GitHub Actions workflow） |
+| Status | ID | Description |
+|--------|------|-------------|
+| ✅ | P0-01 | Frontend plan-file read path (read plan file when filename present, fallback to detection otherwise) |
+| ⬜ | P0-02 | docker-container:// BuildKit connection protocol |
+| ✅ | P0-03a | Default image naming (derived from source directory name) |
+| ⬜ | P0-03b | docker load export |
+| 🚧 | P0-05 | CLI semantic alignment: --env bare KEY, --error-missing-start flag |
+| 🚧 | P0-06 | ARCPACK_CONFIG_FILE integrated into config priority, railpack.json compatibility pending |
+| ⬜ | P0-08 | Regression test reinforcement: expand fixtures to railpack-level 104 |
+| ⬜ | P0-09 | CI/CD (GitHub Actions workflow) |
 
-### 潜在改进项
+### Potential Improvements
 
-| 状态 | 说明 |
-|------|------|
-| ⬜ | C++ 二进制名称从 CMakeLists.txt 解析（当前用目录名启发式） |
-| ⬜ | Gleam 版本固定（当前 latest） |
-| ⬜ | 更多 Node.js fixture（turborepo/prisma/puppeteer 等） |
-| ⬜ | Python fixture 补充（fastapi/flask/pdm 等） |
-| ⬜ | tty 进度显示（当前仅 plain text） |
+| Status | Description |
+|--------|-------------|
+| ⬜ | C++ binary name parsing from CMakeLists.txt (currently uses directory name heuristic) |
+| ⬜ | Gleam version pinning (currently latest) |
+| ⬜ | More Node.js fixtures (turborepo/prisma/puppeteer, etc.) |
+| ⬜ | Python fixture additions (fastapi/flask/pdm, etc.) |
+| ⬜ | TTY progress display (currently plain text only) |
 
-## 技术栈
+## Tech Stack
 
-- **语言**: Rust
-- **构建工具**: BuildKit (buildkitd + buildctl)
-- **通信方式**: gRPC（Unix Socket / TCP）
-- **关键 crate**: tokio（异步）、tonic（gRPC）、clap（CLI）、serde（序列化）
+- **Language**: Rust
+- **Build Tool**: BuildKit (buildkitd + buildctl)
+- **Communication**: gRPC (Unix Socket / TCP)
+- **Key Crates**: tokio (async), tonic (gRPC), clap (CLI), serde (serialization)
 
-## 许可证
+## License
 
-Private — ArcBox 内部项目
+Private — ArcBox internal project
