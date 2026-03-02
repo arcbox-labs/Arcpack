@@ -5,8 +5,8 @@
 
 use std::collections::HashMap;
 
-use arcpack::app::App;
 use arcpack::app::environment::Environment;
+use arcpack::app::App;
 use arcpack::config::Config;
 use arcpack::error::ArcpackError;
 use arcpack::generate::GenerateContext;
@@ -70,8 +70,7 @@ fn generate_plan_from_fixture(
         }
     }
 
-    let mut provider_to_use =
-        provider_to_use.ok_or_else(|| ArcpackError::NoProviderMatched)?;
+    let mut provider_to_use = provider_to_use.ok_or_else(|| ArcpackError::NoProviderMatched)?;
 
     let version_resolver = Box::new(MockVersionResolver);
     let mut ctx = GenerateContext::new(app, env, config, version_resolver)?;
@@ -169,7 +168,11 @@ fn test_npm_plan_has_start_command() {
 #[test]
 fn test_pnpm_plan_has_install_step() {
     let (plan, _, _) = generate_plan_from_fixture("node-pnpm").unwrap();
-    let step_names: Vec<&str> = plan.steps.iter().filter_map(|s| s.name.as_deref()).collect();
+    let step_names: Vec<&str> = plan
+        .steps
+        .iter()
+        .filter_map(|s| s.name.as_deref())
+        .collect();
     assert!(step_names.contains(&"install"), "missing install step");
 }
 
@@ -277,10 +280,22 @@ fn test_snapshot_go_cmd_subdir() {
         "go provider should produce ./out binary"
     );
     // build 步骤应包含 cmd/server 子目录构建
-    let build_step = plan.steps.iter().find(|s| s.name.as_deref() == Some("build")).unwrap();
-    let build_cmd = build_step.commands.iter().find_map(|c| {
-        if let arcpack::plan::Command::Exec(e) = c { Some(e.cmd.as_str()) } else { None }
-    }).unwrap();
+    let build_step = plan
+        .steps
+        .iter()
+        .find(|s| s.name.as_deref() == Some("build"))
+        .unwrap();
+    let build_cmd = build_step
+        .commands
+        .iter()
+        .find_map(|c| {
+            if let arcpack::plan::Command::Exec(e) = c {
+                Some(e.cmd.as_str())
+            } else {
+                None
+            }
+        })
+        .unwrap();
     assert!(
         build_cmd.contains("./cmd/server") || build_cmd.contains(" ."),
         "build should target cmd/server or root, got: {build_cmd}"
@@ -409,7 +424,10 @@ fn test_snapshot_with_procfile() {
 fn test_snapshot_procfile_worker() {
     // procfile-worker 没有主 provider 的入口文件，应该匹配不到
     let result = generate_plan_from_fixture("procfile-worker");
-    assert!(result.is_err(), "procfile-worker has no provider entry, should fail to match");
+    assert!(
+        result.is_err(),
+        "procfile-worker has no provider entry, should fail to match"
+    );
 }
 
 // === Deno Provider ===
@@ -418,7 +436,12 @@ fn test_snapshot_procfile_worker() {
 fn test_snapshot_deno_basic() {
     let (plan, _resolved, providers) = generate_plan_from_fixture("deno-basic").unwrap();
     assert_eq!(providers, vec!["deno"]);
-    assert!(plan.deploy.start_cmd.as_deref().unwrap().contains("deno run"));
+    assert!(plan
+        .deploy
+        .start_cmd
+        .as_deref()
+        .unwrap()
+        .contains("deno run"));
     insta_settings().bind(|| {
         insta::assert_json_snapshot!("deno-basic-plan", plan);
     });
@@ -430,7 +453,12 @@ fn test_snapshot_deno_basic() {
 fn test_snapshot_gleam_basic() {
     let (plan, _resolved, providers) = generate_plan_from_fixture("gleam-basic").unwrap();
     assert_eq!(providers, vec!["gleam"]);
-    assert!(plan.deploy.start_cmd.as_deref().unwrap().contains("erlang-shipment"));
+    assert!(plan
+        .deploy
+        .start_cmd
+        .as_deref()
+        .unwrap()
+        .contains("erlang-shipment"));
     insta_settings().bind(|| {
         insta::assert_json_snapshot!("gleam-basic-plan", plan);
     });
@@ -442,7 +470,12 @@ fn test_snapshot_gleam_basic() {
 fn test_snapshot_cpp_cmake() {
     let (plan, _resolved, providers) = generate_plan_from_fixture("cpp-cmake").unwrap();
     assert_eq!(providers, vec!["cpp"]);
-    assert!(plan.deploy.start_cmd.as_deref().unwrap().starts_with("/build/"));
+    assert!(plan
+        .deploy
+        .start_cmd
+        .as_deref()
+        .unwrap()
+        .starts_with("/build/"));
     insta_settings().bind(|| {
         insta::assert_json_snapshot!("cpp-cmake-plan", plan);
     });
@@ -466,11 +499,13 @@ fn test_config_file_env_var_is_used() {
         "env-specified-config.json".to_string(),
     )]));
 
-    let config_file_path: Option<String> =
-        env.get_config_variable("CONFIG_FILE").0;
+    let config_file_path: Option<String> = env.get_config_variable("CONFIG_FILE").0;
     let result = Config::load(&app, &env, Config::empty(), &config_file_path);
 
-    assert!(result.is_err(), "应因找不到 env-specified-config.json 而报错");
+    assert!(
+        result.is_err(),
+        "应因找不到 env-specified-config.json 而报错"
+    );
     let err_msg = result.unwrap_err().to_string();
     assert!(
         err_msg.contains("env-specified-config.json"),
@@ -522,7 +557,12 @@ fn test_config_file_cli_flag_overrides_env_var() {
 fn test_snapshot_dotnet_basic() {
     let (plan, _resolved, providers) = generate_plan_from_fixture("dotnet-basic").unwrap();
     assert_eq!(providers, vec!["dotnet"]);
-    assert!(plan.deploy.start_cmd.as_deref().unwrap().contains("out/MyApp"));
+    assert!(plan
+        .deploy
+        .start_cmd
+        .as_deref()
+        .unwrap()
+        .contains("out/MyApp"));
     insta_settings().bind(|| {
         insta::assert_json_snapshot!("dotnet-basic-plan", plan);
     });
@@ -558,7 +598,10 @@ fn test_snapshot_elixir_basic() {
 fn test_snapshot_php_basic() {
     let (plan, _resolved, providers) = generate_plan_from_fixture("php-basic").unwrap();
     assert_eq!(providers, vec!["php"]);
-    assert_eq!(plan.deploy.start_cmd.as_deref(), Some("/start-container.sh"));
+    assert_eq!(
+        plan.deploy.start_cmd.as_deref(),
+        Some("/start-container.sh")
+    );
     insta_settings().bind(|| {
         insta::assert_json_snapshot!("php-basic-plan", plan);
     });

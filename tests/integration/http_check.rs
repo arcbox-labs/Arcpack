@@ -1,7 +1,6 @@
 /// HTTP 健康检查模块
 ///
 /// 启动容器，轮询 HTTP 端点直到满足预期条件。
-
 use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -71,9 +70,7 @@ pub fn verify_http(image_tag: &str, check: &HttpCheck) -> Result<(), String> {
     stop_container(&container_id);
     Err(format!(
         "HTTP check failed (retries={}, timeout={}s): {}",
-        check.retries,
-        check.timeout_secs,
-        last_error
+        check.retries, check.timeout_secs, last_error
     ))
 }
 
@@ -108,7 +105,8 @@ fn get_mapped_port(container_id: &str) -> Result<u16, String> {
 
     let port_str = String::from_utf8_lossy(&output.stdout);
     // 输出格式: "0.0.0.0:PORT" 或 ":::PORT"
-    let port = port_str.trim()
+    let port = port_str
+        .trim()
         .rsplit(':')
         .next()
         .and_then(|p| p.parse::<u16>().ok())

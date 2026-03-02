@@ -148,7 +148,7 @@ impl Provider for GleamProvider {
             ])),
         );
 
-        let mut build_filter = Filter::include_only(vec!["build/erlang-shipment".to_string()]);
+        let mut build_filter = Filter::include_only(vec!["build/erlang-shipment/.".to_string()]);
 
         if self.include_source {
             // 包含完整源码

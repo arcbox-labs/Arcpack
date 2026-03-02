@@ -2,7 +2,6 @@
 ///
 /// 需要 buildkitd + docker 运行环境。
 /// 运行：`cargo test --test integration_tests -- --ignored`
-
 mod integration;
 
 /// 扫描所有带 test.json 的 fixture 并逐个运行
@@ -29,7 +28,8 @@ fn test_all_fixtures() {
         panic!(
             "{} fixture(s) failed:\n{}",
             failures.len(),
-            failures.iter()
+            failures
+                .iter()
                 .map(|(name, err)| format!("  - {}: {}", name, err))
                 .collect::<Vec<_>>()
                 .join("\n")
@@ -46,11 +46,7 @@ fn test_fixture_plan_generation() {
     for fixture in &fixtures {
         println!("generating plan for: {}", fixture);
         // 只验证 plan 生成不 panic
-        let fixture_path = format!(
-            "{}/tests/fixtures/{}",
-            env!("CARGO_MANIFEST_DIR"),
-            fixture
-        );
+        let fixture_path = format!("{}/tests/fixtures/{}", env!("CARGO_MANIFEST_DIR"), fixture);
 
         let app = arcpack::app::App::new(&fixture_path).unwrap();
         let env = arcpack::app::environment::Environment::new(std::collections::HashMap::new());

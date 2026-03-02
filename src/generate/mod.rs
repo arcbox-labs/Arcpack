@@ -15,7 +15,7 @@ use crate::app::App;
 use crate::config::Config;
 use crate::plan::dockerignore::DockerignoreContext;
 use crate::plan::{
-    spread, spread_strings, BuildPlan, Command, Filter, Layer, Step, ARCPACK_BUILDER_IMAGE,
+    spread, spread_strings, BuildPlan, Command, Filter, Layer, ARCPACK_BUILDER_IMAGE,
 };
 use crate::resolver::{ResolvedPackage, Resolver, VersionResolver};
 use crate::Result;
@@ -255,6 +255,14 @@ impl GenerateContext {
     fn apply_config(&mut self) {
         self.apply_packages_from_config();
 
+        // 对齐 railpack：只要存在自定义步骤，也会生成 packages:mise 基础步骤。
+        if !self.config.steps.is_empty() && self.mise_step_builder.is_none() {
+            self.mise_step_builder = Some(MiseStepBuilder::new(
+                mise_step_builder::MISE_STEP_NAME,
+                &self.config,
+            ));
+        }
+
         // 合并缓存配置
         for (k, v) in &self.config.caches {
             self.caches.set_cache(k, v.clone());
@@ -305,8 +313,10 @@ impl GenerateContext {
 
         for name in step_names {
             let config_step = self.config.steps[&name].clone();
-            let needs_local_input =
-                config_step.step.inputs.is_empty() && step_uses_local_copy(&config_step.step);
+            let needs_local_input = config_step.step.inputs.is_empty()
+                && (config_step.needs_local_input
+                    || (self.config.auto_local_copy_steps
+                        && step_uses_local_copy(&config_step.step)));
             let local_layer = needs_local_input.then(|| self.new_local_layer());
 
             // 查找或创建 CommandStepBuilder
@@ -445,14 +455,10 @@ impl GenerateContext {
     }
 }
 
-fn step_uses_local_copy(step: &Step) -> bool {
-    step.commands.iter().any(|cmd| {
-        matches!(
-            cmd,
-            Command::Copy(copy)
-                if copy.image.is_none()
-        )
-    })
+fn step_uses_local_copy(step: &crate::plan::Step) -> bool {
+    step.commands
+        .iter()
+        .any(|cmd| matches!(cmd, Command::Copy(copy) if copy.image.is_none()))
 }
 
 fn command_step_has_local_input(csb: &CommandStepBuilder) -> bool {
@@ -592,7 +598,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_config_only_step_gets_base_image_input() {
+    fn test_generate_config_only_step_gets_mise_input() {
         let (_dir, mut ctx) = make_test_ctx();
 
         ctx.config.steps.insert(
@@ -614,6 +620,6 @@ mod tests {
             .expect("custom step should exist");
 
         assert!(!custom.inputs.is_empty());
-        assert_eq!(custom.inputs[0].image.as_deref(), Some(ARCPACK_BUILDER_IMAGE));
+        assert_eq!(custom.inputs[0].step.as_deref(), Some("packages:mise"));
     }
 }

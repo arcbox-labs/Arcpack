@@ -7,7 +7,6 @@ use serde::Deserialize;
 use crate::app::environment::Environment;
 use crate::app::App;
 use crate::generate::command_step_builder::CommandStepBuilder;
-use crate::generate::install_bin_builder::InstallBinBuilder;
 use crate::generate::mise_step_builder::{self, MiseStepBuilder};
 use crate::generate::GenerateContext;
 use crate::plan::{Command, Filter, Layer};
@@ -15,31 +14,10 @@ use crate::provider::Provider;
 use crate::Result;
 
 /// Caddy 默认版本
-const DEFAULT_CADDY_VERSION: &str = "2";
-/// Caddy 安装步骤名
-const CADDY_STEP_NAME: &str = "packages:caddy";
+const DEFAULT_CADDY_VERSION: &str = "latest";
 
 /// 默认 Caddyfile 模板
-const CADDYFILE_TEMPLATE: &str = r#":{$PORT:3000} {
-    root * /app/{STATIC_FILE_ROOT}
-    encode gzip zstd
-
-    handle /health {
-        respond "OK" 200
-    }
-
-    handle {
-        try_files {path} {path}.html {path}/index.html /index.html
-        file_server
-    }
-
-    header {
-        X-Content-Type-Options nosniff
-        X-Frame-Options DENY
-        X-XSS-Protection "1; mode=block"
-    }
-}
-"#;
+const CADDYFILE_TEMPLATE: &str = include_str!("templates/Caddyfile.template");
 
 /// Staticfile YAML 配置
 #[derive(Debug, Deserialize, Default)]
@@ -137,16 +115,10 @@ impl Provider for StaticFileProvider {
     fn plan(&self, ctx: &mut GenerateContext) -> Result<()> {
         // mise 步骤：安装 caddy
         Self::ensure_mise_step_builder(ctx);
-
-        // 安装 Caddy 二进制（通过 InstallBinBuilder，和 Node SPA 模式一致）
-        let mut caddy_builder = InstallBinBuilder::new(CADDY_STEP_NAME);
-        let caddy_ref =
-            caddy_builder.default_package(&mut ctx.resolver, "caddy", DEFAULT_CADDY_VERSION);
-        let _ = caddy_ref;
-
-        let caddy_layer = caddy_builder.get_layer();
-        let caddy_paths = caddy_builder.get_output_paths();
-        ctx.steps.push(Box::new(caddy_builder));
+        {
+            let mise = ctx.mise_step_builder.as_mut().unwrap();
+            let _ = mise.default_package(&mut ctx.resolver, "caddy", DEFAULT_CADDY_VERSION);
+        }
 
         // 检查用户自定义 Caddyfile
         let has_custom_caddyfile =
@@ -161,33 +133,34 @@ impl Provider for StaticFileProvider {
         ));
         {
             let build = Self::get_command_step(&mut ctx.steps, "build");
-            build.add_input(caddy_layer.clone());
             build.add_input(local_layer);
 
             if !has_custom_caddyfile {
                 let caddyfile_content =
-                    CADDYFILE_TEMPLATE.replace("{STATIC_FILE_ROOT}", &self.root_dir);
-                build.add_command(Command::new_file("/app/Caddyfile", &caddyfile_content));
+                    CADDYFILE_TEMPLATE.replace("{{.STATIC_FILE_ROOT}}", &self.root_dir);
+                build
+                    .assets
+                    .insert("Caddyfile".to_string(), caddyfile_content);
+                build.add_command(Command::new_file("Caddyfile", "Caddyfile"));
             }
 
-            build.add_command(Command::new_exec("caddy fmt --overwrite /app/Caddyfile"));
+            build.add_command(Command::new_exec("caddy fmt --overwrite Caddyfile"));
         }
 
         // Deploy 配置
         ctx.deploy.start_cmd =
-            Some("caddy run --config /app/Caddyfile --adapter caddyfile 2>&1".to_string());
+            Some("caddy run --config Caddyfile --adapter caddyfile 2>&1".to_string());
 
-        // deploy inputs: caddy 二进制 + build 步骤输出
+        // deploy inputs: mise 层 + build 步骤输出
+        let mise_layer = ctx
+            .mise_step_builder
+            .as_ref()
+            .map(|m| m.get_layer())
+            .unwrap_or_default();
         let build_layer =
             Layer::new_step_layer("build", Some(Filter::include_only(vec![".".to_string()])));
 
-        ctx.deploy.add_inputs(&[caddy_layer, build_layer]);
-
-        // PATH 中加入 caddy
-        for path in &caddy_paths {
-            ctx.deploy.paths.push(path.clone());
-            ctx.deploy.paths.push(format!("{}/bin", path));
-        }
+        ctx.deploy.add_inputs(&[mise_layer, build_layer]);
 
         Ok(())
     }
@@ -334,8 +307,8 @@ mod tests {
 
     #[test]
     fn test_caddyfile_template_substitution() {
-        let content = CADDYFILE_TEMPLATE.replace("{STATIC_FILE_ROOT}", "dist");
-        assert!(content.contains("root * /app/dist"));
+        let content = CADDYFILE_TEMPLATE.replace("{{.STATIC_FILE_ROOT}}", "dist");
+        assert!(content.contains("root * dist"));
     }
 
     #[test]
@@ -356,7 +329,7 @@ mod tests {
 
         assert_eq!(
             ctx.deploy.start_cmd.as_deref(),
-            Some("caddy run --config /app/Caddyfile --adapter caddyfile 2>&1")
+            Some("caddy run --config Caddyfile --adapter caddyfile 2>&1")
         );
     }
 

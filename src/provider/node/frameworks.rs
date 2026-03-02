@@ -109,7 +109,7 @@ fn detect_nextjs(pkg: &PackageJson, pkg_path: &str) -> Option<FrameworkInfo> {
     Some(FrameworkInfo {
         name: "next".to_string(),
         mode: DeployMode::Ssr,
-        start_cmd: Some("npm start".to_string()),
+        start_cmd: None,
         output_dir: None,
         cache_dirs: vec![cache_path],
     })
@@ -139,7 +139,7 @@ fn detect_remix(pkg: &PackageJson) -> Option<FrameworkInfo> {
     Some(FrameworkInfo {
         name: "remix".to_string(),
         mode: DeployMode::Ssr,
-        start_cmd: Some("npm start".to_string()),
+        start_cmd: None,
         output_dir: None,
         cache_dirs: vec!["/app/.cache".to_string()],
     })
@@ -154,7 +154,7 @@ fn detect_tanstack_start(pkg: &PackageJson) -> Option<FrameworkInfo> {
     Some(FrameworkInfo {
         name: "tanstack-start".to_string(),
         mode: DeployMode::Ssr,
-        start_cmd: Some("npm start".to_string()),
+        start_cmd: None,
         output_dir: None,
         cache_dirs: vec![],
     })
@@ -179,7 +179,7 @@ fn detect_astro(app: &App, pkg: &PackageJson, pkg_path: &str) -> Option<Framewor
         Some(FrameworkInfo {
             name: "astro".to_string(),
             mode: DeployMode::Ssr,
-            start_cmd: Some("npm start".to_string()),
+            start_cmd: None,
             output_dir: None,
             cache_dirs: vec![cache_path],
         })
@@ -249,13 +249,25 @@ fn detect_react_router(app: &App, pkg: &PackageJson, pkg_path: &str) -> Option<F
     };
 
     // 读取 buildDirectory 配置
-    let out_dir = read_react_router_build_dir(app).unwrap_or_else(|| "build/client".to_string());
+    let out_dir =
+        read_react_router_build_dir(app).unwrap_or_else(|| "build/client/".to_string());
+
+    let mode = if pkg.has_script("start") {
+        DeployMode::Ssr
+    } else {
+        DeployMode::Spa
+    };
+    let output_dir = if mode == DeployMode::Spa {
+        Some(out_dir)
+    } else {
+        None
+    };
 
     Some(FrameworkInfo {
         name: "react-router".to_string(),
-        mode: DeployMode::Spa,
+        mode,
         start_cmd: None,
-        output_dir: Some(out_dir),
+        output_dir,
         cache_dirs: vec![cache_path],
     })
 }
@@ -311,7 +323,7 @@ fn detect_vite(
         return Some(FrameworkInfo {
             name: "vite".to_string(),
             mode: DeployMode::Ssr,
-            start_cmd: Some("npm start".to_string()),
+            start_cmd: None,
             output_dir: None,
             cache_dirs: vec![cache_path],
         });

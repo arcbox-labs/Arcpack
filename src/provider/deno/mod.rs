@@ -13,6 +13,7 @@ use crate::Result;
 
 /// 默认 Deno 版本
 const DEFAULT_DENO_VERSION: &str = "2";
+const ROOT_CACHE: &str = "/root/.cache";
 
 /// 主文件搜索优先级
 const MAIN_FILE_CANDIDATES: &[&str] = &["main.ts", "main.js", "main.mjs", "main.mts"];
@@ -122,13 +123,6 @@ impl Provider for DenoProvider {
             }
         }
 
-        // 缓存：Deno 全局缓存目录
-        let cache_name = ctx.caches.add_cache("deno-cache", "/root/.cache");
-        {
-            let build = Self::get_command_step(&mut ctx.steps, "build");
-            build.add_cache(&cache_name);
-        }
-
         // === Deploy 配置 ===
         if let Some(ref main_file) = self.main_file {
             ctx.deploy.start_cmd = Some(format!("deno run --allow-all {}", main_file));
@@ -141,8 +135,13 @@ impl Provider for DenoProvider {
             .map(|m| m.get_layer())
             .unwrap_or_default();
 
-        let build_layer =
-            Layer::new_step_layer("build", Some(Filter::include_only(vec![".".to_string()])));
+        let build_layer = Layer::new_step_layer(
+            "build",
+            Some(Filter::include_only(vec![
+                ".".to_string(),
+                ROOT_CACHE.to_string(),
+            ])),
+        );
 
         ctx.deploy.add_inputs(&[mise_layer, build_layer]);
 
@@ -287,7 +286,7 @@ mod tests {
         );
 
         assert_eq!(ctx.metadata.get("denoMainFile"), Some("main.ts"));
-        assert!(ctx.caches.get_cache("deno-cache").is_some());
+        assert!(ctx.caches.get_cache("deno-cache").is_none());
     }
 
     #[test]

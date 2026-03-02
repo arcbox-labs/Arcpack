@@ -138,20 +138,10 @@ impl PackageManagerKind {
                 }
             }
             PackageManagerKind::Bun => {
-                let has_lockfile = app.has_file("bun.lockb") || app.has_file("bun.lock");
-                if has_lockfile {
-                    install.add_command(Command::new_exec("bun install --frozen-lockfile"));
-                } else {
-                    install.add_command(Command::new_exec("bun install"));
-                }
+                install.add_command(Command::new_exec("bun install --frozen-lockfile"));
             }
             PackageManagerKind::Yarn1 => {
-                let has_lockfile = app.has_file("yarn.lock");
-                if has_lockfile {
-                    install.add_command(Command::new_exec("yarn install --frozen-lockfile"));
-                } else {
-                    install.add_command(Command::new_exec("yarn install"));
-                }
+                install.add_command(Command::new_exec("yarn install --frozen-lockfile"));
             }
             PackageManagerKind::YarnBerry => {
                 install.add_command(Command::new_exec("yarn install --check-cache"));
@@ -428,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bun_install_without_lockfile_no_frozen() {
+    fn test_bun_install_without_lockfile_uses_frozen() {
         let dir = tempfile::TempDir::new().unwrap();
         let app = App::new(dir.path().to_str().unwrap()).unwrap();
 
@@ -437,8 +427,8 @@ mod tests {
         PackageManagerKind::Bun.install_deps(&app, &mut caches, &mut install, false);
 
         assert!(
-            !commands_debug_str(&install).contains("--frozen-lockfile"),
-            "无锁文件时不应使用 --frozen-lockfile"
+            commands_debug_str(&install).contains("--frozen-lockfile"),
+            "无锁文件时仍应使用 --frozen-lockfile"
         );
     }
 
@@ -459,7 +449,7 @@ mod tests {
     }
 
     #[test]
-    fn test_yarn1_install_without_lockfile_no_frozen() {
+    fn test_yarn1_install_without_lockfile_uses_frozen() {
         let dir = tempfile::TempDir::new().unwrap();
         let app = App::new(dir.path().to_str().unwrap()).unwrap();
 
@@ -468,8 +458,8 @@ mod tests {
         PackageManagerKind::Yarn1.install_deps(&app, &mut caches, &mut install, false);
 
         assert!(
-            !commands_debug_str(&install).contains("--frozen-lockfile"),
-            "无锁文件时不应使用 --frozen-lockfile"
+            commands_debug_str(&install).contains("--frozen-lockfile"),
+            "无锁文件时仍应使用 --frozen-lockfile"
         );
     }
 }

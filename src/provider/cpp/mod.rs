@@ -94,17 +94,10 @@ impl Provider for CppProvider {
                 BuildSystem::CMake => {
                     mise.default_package(&mut ctx.resolver, "cmake", DEFAULT_CMAKE_VERSION);
                     mise.default_package(&mut ctx.resolver, "ninja", DEFAULT_NINJA_VERSION);
-                    // CMake 需要 C++ 编译器
-                    mise.add_supporting_apt_package("g++");
-                    mise.add_supporting_apt_package("gcc");
-                    mise.add_supporting_apt_package("make");
                 }
                 BuildSystem::Meson => {
                     mise.default_package(&mut ctx.resolver, "meson", DEFAULT_MESON_VERSION);
                     mise.default_package(&mut ctx.resolver, "ninja", DEFAULT_NINJA_VERSION);
-                    mise.add_supporting_apt_package("g++");
-                    mise.add_supporting_apt_package("gcc");
-                    mise.add_supporting_apt_package("pkg-config");
                 }
             }
         }
@@ -122,6 +115,7 @@ impl Provider for CppProvider {
             let local_layer = ctx.new_local_layer();
             let build = Self::get_command_step(&mut ctx.steps, "build");
             build.add_input(local_layer);
+            build.add_command(Command::new_exec("mkdir /build"));
 
             match self.build_system {
                 BuildSystem::CMake => {
@@ -150,7 +144,7 @@ impl Provider for CppProvider {
         // deploy inputs: build 步骤输出（仅 /build 目录）
         let build_layer = Layer::new_step_layer(
             "build",
-            Some(Filter::include_only(vec!["/build".to_string()])),
+            Some(Filter::include_only(vec!["/build/".to_string()])),
         );
 
         ctx.deploy.add_inputs(&[build_layer]);

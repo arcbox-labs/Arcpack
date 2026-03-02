@@ -57,6 +57,10 @@ pub struct StepConfig {
     /// 部署输出过滤
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deploy_outputs: Vec<Filter>,
+
+    /// 是否需要自动注入本地源码输入层（仅内部标记，不写入配置文件）
+    #[serde(skip)]
+    pub needs_local_input: bool,
 }
 
 /// 顶层配置（对应 arcpack.json）
@@ -90,6 +94,10 @@ pub struct Config {
     /// Secret 引用
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub secrets: Vec<String>,
+
+    /// 是否对配置步骤启用本地拷贝输入自动推断（仅内部使用）
+    #[serde(skip)]
+    pub auto_local_copy_steps: bool,
 }
 
 impl Config {
@@ -110,6 +118,7 @@ impl Config {
                     commands: vec![Command::new_copy(".", "."), Command::new_exec_shell(cmd)],
                     ..Step::new("build")
                 },
+                needs_local_input: true,
                 ..Default::default()
             };
             config.steps.insert("build".to_string(), step_config);
@@ -164,7 +173,13 @@ impl Config {
             return Ok(Self::empty());
         }
 
-        app.read_json(file_name)
+        let mut config: Self = app.read_json(file_name)?;
+        // 默认 arcpack.json 延续历史行为：对 copy 命令自动注入 local input。
+        // 自定义配置文件（如 railpack.json）不启用该推断，避免兼容场景误注入。
+        if file_name == DEFAULT_CONFIG_FILE {
+            config.auto_local_copy_steps = true;
+        }
+        Ok(config)
     }
 
     /// 从环境变量加载
@@ -184,6 +199,7 @@ impl Config {
                     commands: vec![Command::new_copy(".", "."), install_cmd],
                     ..Step::new("install")
                 },
+                needs_local_input: true,
                 ..Default::default()
             };
             config.steps.insert("install".to_string(), step_config);
@@ -200,6 +216,7 @@ impl Config {
                     commands: vec![Command::new_copy(".", "."), build_cmd],
                     ..Step::new("build")
                 },
+                needs_local_input: true,
                 ..Default::default()
             };
             config.steps.insert("build".to_string(), step_config);
@@ -304,6 +321,10 @@ impl Config {
 
         if !right.secrets.is_empty() {
             result.secrets = right.secrets.clone();
+        }
+
+        if right.auto_local_copy_steps {
+            result.auto_local_copy_steps = true;
         }
 
         result
@@ -585,6 +606,22 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.provider, Some("node".to_string()));
+        assert!(!config.auto_local_copy_steps);
+    }
+
+    #[test]
+    fn test_load_default_arcpack_config_enables_auto_local_copy_heuristic() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("arcpack.json"),
+            r#"{ "steps": { "build": { "commands": [{ "src": ".", "dest": "." }] } } }"#,
+        )
+        .unwrap();
+
+        let app = App::new(dir.path()).unwrap();
+        let env = Environment::default();
+        let config = Config::load(&app, &env, Config::empty(), &None).unwrap();
+        assert!(config.auto_local_copy_steps);
     }
 
     #[test]
@@ -650,5 +687,26 @@ mod tests {
             config.deploy.as_ref().unwrap().start_cmd,
             Some("npm start".to_string())
         );
+    }
+
+    #[test]
+    fn test_load_custom_config_disables_auto_local_copy_heuristic() {
+        let fixture =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("railpack/examples/secrets");
+        let app = App::new(fixture).unwrap();
+        let env = Environment::default();
+
+        let config = Config::load(
+            &app,
+            &env,
+            Config::empty(),
+            &Some("railpack.json".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(config.provider, None);
+        assert!(!config.auto_local_copy_steps);
+        assert!(!config.steps["defaultsToUsing"].needs_local_input);
+        assert!(!config.steps["usesSecrets"].needs_local_input);
     }
 }

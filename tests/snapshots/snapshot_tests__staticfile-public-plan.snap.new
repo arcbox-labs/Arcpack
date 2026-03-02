@@ -1,0 +1,98 @@
+---
+source: tests/snapshot_tests.rs
+assertion_line: 242
+expression: plan
+---
+{
+  "steps": [
+    {
+      "name": "packages:mise",
+      "inputs": [
+        {
+          "image": "ghcr.io/railwayapp/railpack-builder:latest"
+        }
+      ],
+      "commands": [
+        {
+          "path": "/mise/shims"
+        },
+        {
+          "path": "/etc/mise/config.toml",
+          "name": "mise.toml",
+          "customName": "create mise config"
+        },
+        {
+          "cmd": "mise install",
+          "customName": "install mise packages: caddy"
+        }
+      ],
+      "assets": {
+        "mise.toml": "[tools.caddy]\nversion = \"latest.0.0\"\n"
+      },
+      "variables": {
+        "MISE_CACHE_DIR": "/mise/cache",
+        "MISE_CONFIG_DIR": "/mise",
+        "MISE_DATA_DIR": "/mise",
+        "MISE_IDIOMATIC_VERSION_FILE_ENABLE_TOOLS": "python,node,ruby,elixir,go,java,yarn",
+        "MISE_INSTALLS_DIR": "/mise/installs",
+        "MISE_NODE_VERIFY": "false",
+        "MISE_PARANOID": "1",
+        "MISE_SHIMS_DIR": "/mise/shims",
+        "MISE_TRUSTED_CONFIG_PATHS": "/app"
+      }
+    },
+    {
+      "name": "build",
+      "inputs": [
+        {
+          "step": "packages:mise"
+        },
+        {
+          "include": [
+            "."
+          ],
+          "local": true
+        }
+      ],
+      "commands": [
+        {
+          "path": "Caddyfile",
+          "name": "Caddyfile"
+        },
+        {
+          "cmd": "caddy fmt --overwrite Caddyfile"
+        }
+      ],
+      "secrets": [
+        "*"
+      ],
+      "assets": {
+        "Caddyfile": "{\n\tadmin off\n\tpersist_config off\n\tauto_https off\n\n\tlog {\n\t\tformat json\n\t}\n\n\tservers {\n\t\ttrusted_proxies static private_ranges\n\t}\n}\n\n:{$PORT:80} {\n\tlog {\n\t\tformat json\n\t}\n\n\trespond /health 200\n\n\t# Security headers\n\theader {\n\t\t# Enable cross-site filter (XSS) and tell browsers to block detected attacks\n\t\tX-XSS-Protection \"1; mode=block\"\n\t\t# Prevent some browsers from MIME-sniffing a response away from the declared Content-Type\n\t\tX-Content-Type-Options \"nosniff\"\n\t\t# Keep referrer data off of HTTP connections\n\t\tReferrer-Policy \"strict-origin-when-cross-origin\"\n\t\t# Enable strict Content Security Policy\n\t\tContent-Security-Policy \"default-src 'self'; img-src 'self' data: https: *; style-src 'self' 'unsafe-inline' https: *; script-src 'self' 'unsafe-inline' https: *; font-src 'self' data: https: *; connect-src 'self' https: *; media-src 'self' https: *; object-src 'none'; frame-src 'self' https: *;\"\n\t\t# Remove Server header\n\t\t-Server\n\t}\n\n\troot * public\n\n\t# Handle static files\n\tfile_server {\n\t\thide .git\n\t\thide .env*\n\t}\n\n\t# Compression with more formats\n\tencode {\n\t\tgzip\n\t\tzstd\n\t}\n\n\t# Try files with HTML extension and handle SPA routing\n\ttry_files {path} {path}.html {path}/index.html /index.html\n\n\t# Handle 404 errors\n\thandle_errors {\n\t\trewrite * /{err.status_code}.html\n\t\tfile_server\n\t}\n}\n"
+      }
+    }
+  ],
+  "deploy": {
+    "base": {
+      "image": "ghcr.io/railwayapp/railpack-runtime:latest"
+    },
+    "inputs": [
+      {
+        "include": [
+          "/mise/shims",
+          "/mise/installs",
+          "/usr/local/bin/mise",
+          "/etc/mise/config.toml",
+          "/root/.local/state/mise"
+        ],
+        "step": "packages:mise"
+      },
+      {
+        "include": [
+          "."
+        ],
+        "step": "build"
+      }
+    ],
+    "startCommand": "caddy run --config Caddyfile --adapter caddyfile 2>&1"
+  }
+}

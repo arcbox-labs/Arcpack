@@ -1,0 +1,142 @@
+---
+source: tests/snapshot_tests.rs
+assertion_line: 375
+expression: plan
+---
+{
+  "steps": [
+    {
+      "name": "packages:mise",
+      "inputs": [
+        {
+          "image": "ghcr.io/railwayapp/railpack-builder:latest"
+        }
+      ],
+      "commands": [
+        {
+          "path": "/mise/shims"
+        },
+        {
+          "path": "/etc/mise/config.toml",
+          "name": "mise.toml",
+          "customName": "create mise config"
+        },
+        {
+          "cmd": "mise install",
+          "customName": "install mise packages: pipx, pipx:poetry, python"
+        }
+      ],
+      "assets": {
+        "mise.toml": "[tools.pipx]\nversion = \"latest.0.0\"\n\n[tools.\"pipx:poetry\"]\nversion = \"latest.0.0\"\n\n[tools.python]\nversion = \"3.13.0.0\"\n"
+      },
+      "variables": {
+        "MISE_CACHE_DIR": "/mise/cache",
+        "MISE_CONFIG_DIR": "/mise",
+        "MISE_DATA_DIR": "/mise",
+        "MISE_IDIOMATIC_VERSION_FILE_ENABLE_TOOLS": "python,node,ruby,elixir,go,java,yarn",
+        "MISE_INSTALLS_DIR": "/mise/installs",
+        "MISE_NODE_VERIFY": "false",
+        "MISE_PARANOID": "1",
+        "MISE_PIPX_UVX": "true",
+        "MISE_PYTHON_COMPILE": "false",
+        "MISE_SHIMS_DIR": "/mise/shims",
+        "MISE_TRUSTED_CONFIG_PATHS": "/app"
+      }
+    },
+    {
+      "name": "install",
+      "inputs": [
+        {
+          "step": "packages:mise"
+        }
+      ],
+      "commands": [
+        {
+          "src": "pyproject.toml",
+          "dest": "pyproject.toml"
+        },
+        {
+          "src": "poetry.lock",
+          "dest": "poetry.lock"
+        },
+        {
+          "path": "/root/.local/bin"
+        },
+        {
+          "path": "/app/.venv/bin"
+        },
+        {
+          "cmd": "poetry install --no-interaction --no-ansi --only main --no-root"
+        }
+      ],
+      "variables": {
+        "PIP_DEFAULT_TIMEOUT": "100",
+        "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+        "POETRY_VIRTUALENVS_IN_PROJECT": "true",
+        "POETRY_VIRTUALENVS_PATH": "/app/.venv",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONFAULTHANDLER": "1",
+        "PYTHONHASHSEED": "random",
+        "PYTHONUNBUFFERED": "1",
+        "VIRTUAL_ENV": "/app/.venv"
+      }
+    },
+    {
+      "name": "build",
+      "inputs": [
+        {
+          "step": "install"
+        },
+        {
+          "include": [
+            "."
+          ],
+          "local": true
+        }
+      ],
+      "secrets": [
+        "*"
+      ]
+    }
+  ],
+  "deploy": {
+    "base": {
+      "image": "ghcr.io/railwayapp/railpack-runtime:latest"
+    },
+    "inputs": [
+      {
+        "include": [
+          "/mise/shims",
+          "/mise/installs",
+          "/usr/local/bin/mise",
+          "/etc/mise/config.toml",
+          "/root/.local/state/mise"
+        ],
+        "step": "packages:mise"
+      },
+      {
+        "include": [
+          "/app/.venv"
+        ],
+        "step": "build"
+      },
+      {
+        "exclude": [
+          ".venv"
+        ],
+        "include": [
+          "."
+        ],
+        "step": "build"
+      }
+    ],
+    "variables": {
+      "PIP_DEFAULT_TIMEOUT": "100",
+      "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONFAULTHANDLER": "1",
+      "PYTHONHASHSEED": "random",
+      "PYTHONUNBUFFERED": "1"
+    }
+  }
+}

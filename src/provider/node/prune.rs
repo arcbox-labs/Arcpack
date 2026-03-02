@@ -5,6 +5,7 @@ use super::package_manager::PackageManagerKind;
 /// 通过 ARCPACK_PRUNE_DEPS=true 触发，构建后删除 devDependencies 以减小镜像体积。
 use std::collections::HashMap;
 
+use crate::app::App;
 use crate::app::environment::Environment;
 use crate::generate::GenerateContext;
 use crate::plan::{BuildPlan, Command, Layer};
@@ -12,7 +13,11 @@ use crate::plan::{BuildPlan, Command, Layer};
 /// 获取裁剪命令
 ///
 /// 各包管理器有不同的裁剪方式
-pub fn get_prune_command(pm: &PackageManagerKind, env: &Environment) -> Option<String> {
+pub fn get_prune_command(
+    pm: &PackageManagerKind,
+    env: &Environment,
+    app: Option<&App>,
+) -> Option<String> {
     // 用户自定义裁剪命令优先
     if let (Some(custom_cmd), _) = env.get_config_variable("NODE_PRUNE_CMD") {
         if !custom_cmd.is_empty() {
@@ -32,10 +37,31 @@ pub fn get_prune_command(pm: &PackageManagerKind, env: &Environment) -> Option<S
             "rm -rf node_modules && bun install --production --ignore-scripts".to_string()
         }
         PackageManagerKind::Yarn1 => "yarn install --production=true".to_string(),
-        PackageManagerKind::YarnBerry => "yarn workspaces focus --production --all".to_string(),
+        PackageManagerKind::YarnBerry => {
+            // 对齐 railpack：
+            // - Yarn 3: 无可靠 prune，使用 install --check-cache
+            // - Yarn 2 / 4+: 使用 workspaces focus
+            if app.is_some_and(is_yarn_berry_v3) {
+                "yarn install --check-cache".to_string()
+            } else {
+                "yarn workspaces focus --production --all".to_string()
+            }
+        }
     };
 
     Some(cmd)
+}
+
+fn is_yarn_berry_v3(app: &App) -> bool {
+    let Ok(pkg) = app.read_json::<serde_json::Value>("package.json") else {
+        return false;
+    };
+
+    let Some(pm) = pkg.get("packageManager").and_then(|v| v.as_str()) else {
+        return false;
+    };
+
+    pm.starts_with("yarn@3.")
 }
 
 /// 创建裁剪步骤
@@ -46,7 +72,7 @@ pub fn create_prune_step(
     pm: &PackageManagerKind,
     input_step_name: &str,
 ) -> Option<String> {
-    let prune_cmd = get_prune_command(pm, &ctx.env)?;
+    let prune_cmd = get_prune_command(pm, &ctx.env, Some(&ctx.app))?;
     let install_cache = pm.get_install_cache(&mut ctx.caches);
 
     let prune_step = ctx.new_command_step("prune");
@@ -56,7 +82,7 @@ pub fn create_prune_step(
     prune_step.add_cache(&install_cache);
     // prune 不应默认继承 `*` secrets。
     prune_step.secrets.clear();
-    // 对齐 railpack：npm prune 时显式开启 production 模式。
+    // 与 npm 行为对齐：仅 npm prune 需要该环境变量。
     if *pm == PackageManagerKind::Npm {
         prune_step.add_variables(&HashMap::from([(
             "NPM_CONFIG_PRODUCTION".to_string(),
@@ -107,27 +133,27 @@ mod tests {
     #[test]
     fn test_prune_disabled_by_default() {
         let env = make_env(&[]);
-        assert!(get_prune_command(&PackageManagerKind::Npm, &env).is_none());
+        assert!(get_prune_command(&PackageManagerKind::Npm, &env, None).is_none());
     }
 
     #[test]
     fn test_prune_enabled_npm() {
         let env = make_env(&[("ARCPACK_PRUNE_DEPS", "true")]);
-        let cmd = get_prune_command(&PackageManagerKind::Npm, &env).unwrap();
+        let cmd = get_prune_command(&PackageManagerKind::Npm, &env, None).unwrap();
         assert!(cmd.contains("npm prune --omit=dev"));
     }
 
     #[test]
     fn test_prune_enabled_pnpm() {
         let env = make_env(&[("ARCPACK_PRUNE_DEPS", "1")]);
-        let cmd = get_prune_command(&PackageManagerKind::Pnpm, &env).unwrap();
+        let cmd = get_prune_command(&PackageManagerKind::Pnpm, &env, None).unwrap();
         assert!(cmd.contains("pnpm prune --prod"));
     }
 
     #[test]
     fn test_prune_enabled_bun() {
         let env = make_env(&[("ARCPACK_PRUNE_DEPS", "true")]);
-        let cmd = get_prune_command(&PackageManagerKind::Bun, &env).unwrap();
+        let cmd = get_prune_command(&PackageManagerKind::Bun, &env, None).unwrap();
         assert!(cmd.contains("rm -rf node_modules"));
         assert!(cmd.contains("bun install --production"));
     }
@@ -135,21 +161,21 @@ mod tests {
     #[test]
     fn test_prune_enabled_yarn1() {
         let env = make_env(&[("ARCPACK_PRUNE_DEPS", "true")]);
-        let cmd = get_prune_command(&PackageManagerKind::Yarn1, &env).unwrap();
+        let cmd = get_prune_command(&PackageManagerKind::Yarn1, &env, None).unwrap();
         assert!(cmd.contains("yarn install --production=true"));
     }
 
     #[test]
     fn test_prune_enabled_yarn_berry() {
         let env = make_env(&[("ARCPACK_PRUNE_DEPS", "true")]);
-        let cmd = get_prune_command(&PackageManagerKind::YarnBerry, &env).unwrap();
-        assert!(cmd.contains("yarn workspaces focus --production"));
+        let cmd = get_prune_command(&PackageManagerKind::YarnBerry, &env, None).unwrap();
+        assert_eq!(cmd, "yarn workspaces focus --production --all");
     }
 
     #[test]
     fn test_prune_custom_command() {
         let env = make_env(&[("ARCPACK_NODE_PRUNE_CMD", "custom prune")]);
-        let cmd = get_prune_command(&PackageManagerKind::Npm, &env).unwrap();
+        let cmd = get_prune_command(&PackageManagerKind::Npm, &env, None).unwrap();
         assert_eq!(cmd, "custom prune");
     }
 

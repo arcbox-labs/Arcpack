@@ -3,6 +3,7 @@
 /// 对齐 railpack `core/providers/golang/golang.go`
 /// 支持 workspace、CGO 检测、cmd/ 子目录解析。
 use std::collections::HashMap;
+use std::path::Path;
 
 use crate::app::environment::Environment;
 use crate::app::App;
@@ -74,8 +75,32 @@ impl GoProvider {
         false
     }
 
+    fn go_workspace_packages(app: &App) -> Vec<String> {
+        let mut packages = Vec::new();
+        if let Ok(go_mod_files) = app.find_files("**/go.mod") {
+            for file in go_mod_files {
+                if file == "go.mod" {
+                    continue;
+                }
+                if let Some(dir) = Path::new(&file).parent().and_then(|p| p.to_str()) {
+                    packages.push(dir.to_string());
+                }
+            }
+        }
+        packages
+    }
+
+    fn find_workspace_main_module(app: &App) -> Option<String> {
+        for pkg in Self::go_workspace_packages(app) {
+            if app.has_file(&format!("{pkg}/main.go")) {
+                return Some(pkg);
+            }
+        }
+        None
+    }
+
     /// 获取构建命令（对齐 railpack 决策树）
-    fn get_build_command(&self, env: &Environment) -> String {
+    fn get_build_command(&self, env: &Environment, app: &App) -> String {
         let ldflags = "-ldflags=\"-w -s\"";
         let output = "-o out";
 
@@ -91,23 +116,30 @@ impl GoProvider {
 
         // 3. 有 go.mod + 根目录有 .go 文件
         if self.has_go_mod && self.has_root_go_files {
-            return format!("go build {} {} .", ldflags, output);
+            return format!("go build {} {}", ldflags, output);
         }
 
         // 4. 有 cmd/* 子目录
         if !self.cmd_dirs.is_empty() {
             let first_cmd = &self.cmd_dirs[0];
-            return format!("go build {} {} ./cmd/{}", ldflags, output, first_cmd);
+            let cmd_name = Path::new(first_cmd)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(first_cmd);
+            return format!("go build {} {} ./cmd/{}", ldflags, output, cmd_name);
         }
 
         // 5. 仅有 go.mod
         if self.has_go_mod {
-            return format!("go build {} {} .", ldflags, output);
+            return format!("go build {} {}", ldflags, output);
         }
 
-        // 6. workspace 模式（简化处理：go build）
+        // 6. workspace 模式
         if self.is_workspace {
-            return format!("go build {} {} .", ldflags, output);
+            if let Some(module) = Self::find_workspace_main_module(app) {
+                return format!("go build {} {} ./{}", ldflags, output, module);
+            }
+            return format!("go build {} {}", ldflags, output);
         }
 
         // 7. 根目录有 main.go
@@ -116,7 +148,7 @@ impl GoProvider {
         }
 
         // 默认
-        format!("go build {} {} .", ldflags, output)
+        format!("go build {} {}", ldflags, output)
     }
 
     /// 确保 mise_step_builder 已初始化
@@ -164,12 +196,21 @@ impl Provider for GoProvider {
 
         // 检测根目录 .go 文件
         if let Ok(files) = ctx.app.find_files("*.go") {
-            self.has_root_go_files = !files.is_empty();
+            self.has_root_go_files = files.iter().any(|f| !f.contains('/'));
         }
 
         // 检测 cmd/ 子目录
         if let Ok(dirs) = ctx.app.find_directories("cmd/*") {
             self.cmd_dirs = dirs;
+        }
+        if self.cmd_dirs.is_empty() {
+            if let Ok(files) = ctx.app.find_files("cmd/*/main.go") {
+                for file in files {
+                    if let Some(parent) = Path::new(&file).parent().and_then(|p| p.to_str()) {
+                        self.cmd_dirs.push(parent.to_string());
+                    }
+                }
+            }
         }
 
         // 检测 CGO
@@ -264,9 +305,20 @@ impl Provider for GoProvider {
                 if ctx.app.has_file("go.work.sum") {
                     install.add_command(Command::new_copy("go.work.sum", "go.work.sum"));
                 }
+                for pkg_path in Self::go_workspace_packages(&ctx.app) {
+                    let mod_file = format!("{pkg_path}/go.mod");
+                    install.add_command(Command::new_copy(&mod_file, &mod_file));
+                    let sum_file = format!("{pkg_path}/go.sum");
+                    if ctx.app.has_file(&sum_file) {
+                        install.add_command(Command::new_copy(&sum_file, &sum_file));
+                    }
+                }
             }
 
             install.add_command(Command::new_exec("go mod download"));
+
+            let go_cache_name = ctx.caches.add_cache("go-build", "/root/.cache/go-build");
+            install.add_cache(&go_cache_name);
         }
 
         // === build 步骤 ===
@@ -277,7 +329,7 @@ impl Provider for GoProvider {
             let build = Self::get_command_step(&mut ctx.steps, "build");
             build.add_input(local_layer);
 
-            let build_cmd = self.get_build_command(&ctx.env);
+            let build_cmd = self.get_build_command(&ctx.env, &ctx.app);
             build.add_command(Command::new_exec(build_cmd));
 
             // 缓存
@@ -417,34 +469,40 @@ mod tests {
 
     #[test]
     fn test_build_command_root_go_files() {
+        let dir = TempDir::new().unwrap();
+        let app = App::new(dir.path().to_str().unwrap()).unwrap();
         let mut p = GoProvider::new();
         p.has_go_mod = true;
         p.has_root_go_files = true;
         let env = Environment::new(HashMap::new());
-        let cmd = p.get_build_command(&env);
+        let cmd = p.get_build_command(&env, &app);
         assert!(cmd.contains("go build"));
         assert!(cmd.contains("-o out"));
-        assert!(cmd.ends_with(" ."));
+        assert!(!cmd.ends_with(" ."));
     }
 
     #[test]
     fn test_build_command_cmd_dir() {
+        let dir = TempDir::new().unwrap();
+        let app = App::new(dir.path().to_str().unwrap()).unwrap();
         let mut p = GoProvider::new();
         p.has_go_mod = true;
         p.cmd_dirs = vec!["server".to_string()];
         let env = Environment::new(HashMap::new());
-        let cmd = p.get_build_command(&env);
+        let cmd = p.get_build_command(&env, &app);
         assert!(cmd.contains("./cmd/server"));
     }
 
     #[test]
     fn test_build_command_env_go_bin() {
+        let dir = TempDir::new().unwrap();
+        let app = App::new(dir.path().to_str().unwrap()).unwrap();
         let p = GoProvider::new();
         let env = Environment::new(HashMap::from([(
             "ARCPACK_GO_BIN".to_string(),
             "api".to_string(),
         )]));
-        let cmd = p.get_build_command(&env);
+        let cmd = p.get_build_command(&env, &app);
         assert!(cmd.contains("./cmd/api"));
     }
 

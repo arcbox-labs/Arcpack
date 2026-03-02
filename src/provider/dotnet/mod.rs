@@ -2,6 +2,8 @@
 ///
 /// 对齐 railpack `core/providers/dotnet/dotnet.go`
 /// 支持 TargetFramework 版本解析、global.json SDK 版本、NuGet restore。
+use std::collections::HashMap;
+
 use regex::Regex;
 
 use crate::app::environment::Environment;
@@ -66,15 +68,7 @@ impl DotnetProvider {
         json.get("sdk")
             .and_then(|sdk| sdk.get("version"))
             .and_then(|v| v.as_str())
-            .map(|v| {
-                // 提取主版本号 "8.0.100" → "8.0"
-                let parts: Vec<&str> = v.split('.').collect();
-                if parts.len() >= 2 {
-                    format!("{}.{}", parts[0], parts[1])
-                } else {
-                    v.to_string()
-                }
-            })
+            .map(|v| v.to_string())
     }
 
     /// 从 .csproj 文件名提取项目名
@@ -176,39 +170,55 @@ impl Provider for DotnetProvider {
         let install = ctx.new_command_step("install");
         install.add_input(Layer::new_step_layer(&mise_step_name, None));
         {
+            let dotnet_root = format!("/mise/installs/dotnet/{}", self.dotnet_version);
             let install = Self::get_command_step(&mut ctx.steps, "install");
+            install.add_variables(&HashMap::from([
+                (
+                    "ASPNETCORE_ENVIRONMENT".to_string(),
+                    "Production".to_string(),
+                ),
+                (
+                    "ASPNETCORE_CONTENTROOT".to_string(),
+                    "/app/out".to_string(),
+                ),
+                ("DOTNET_CLI_TELEMETRY_OPTOUT".to_string(), "1".to_string()),
+                ("DOTNET_ROOT".to_string(), dotnet_root),
+            ]));
 
-            // 复制项目文件
-            if let Some(ref csproj) = self.csproj_path {
-                install.add_command(Command::new_copy(csproj, csproj));
-            }
-            // 复制可选的 global.json 和 nuget.config
-            if ctx.app.has_file("global.json") {
-                install.add_command(Command::new_copy("global.json", "global.json"));
-            }
-            if ctx.app.has_file("nuget.config") {
-                install.add_command(Command::new_copy("nuget.config", "nuget.config"));
-            }
-
+            install.add_command(Command::new_copy("nuget.config*", "nuget.config*"));
+            install.add_command(Command::new_copy("*.csproj", "*.csproj"));
+            install.add_command(Command::new_copy("global.json*", "global.json*"));
+            install.add_command(Command::new_exec("mkdir -p /root/.nuget/packages"));
             install.add_command(Command::new_exec("dotnet restore"));
-        }
-
-        // NuGet 缓存
-        let cache_name = ctx
-            .caches
-            .add_cache("nuget-packages", "/root/.nuget/packages");
-        {
-            let install = Self::get_command_step(&mut ctx.steps, "install");
-            install.add_cache(&cache_name);
         }
 
         // === build 步骤：dotnet publish ===
         let build = ctx.new_command_step("build");
-        build.add_input(Layer::new_step_layer("install", None));
+        build.add_input(Layer::new_step_layer(&mise_step_name, None));
+        build.add_input(Layer::new_step_layer(
+            "install",
+            Some(Filter::include_only(vec![
+                "obj/".to_string(),
+                "/root/.nuget/packages".to_string(),
+            ])),
+        ));
         {
             let local_layer = ctx.new_local_layer();
+            let dotnet_root = format!("/mise/installs/dotnet/{}", self.dotnet_version);
             let build = Self::get_command_step(&mut ctx.steps, "build");
             build.add_input(local_layer);
+            build.add_variables(&HashMap::from([
+                (
+                    "ASPNETCORE_ENVIRONMENT".to_string(),
+                    "Production".to_string(),
+                ),
+                (
+                    "ASPNETCORE_CONTENTROOT".to_string(),
+                    "/app/out".to_string(),
+                ),
+                ("DOTNET_CLI_TELEMETRY_OPTOUT".to_string(), "1".to_string()),
+                ("DOTNET_ROOT".to_string(), dotnet_root),
+            ]));
 
             build.add_command(Command::new_exec(
                 "dotnet publish --no-restore -c Release -o out",
@@ -231,23 +241,26 @@ impl Provider for DotnetProvider {
             .insert("DOTNET_CLI_TELEMETRY_OPTOUT".to_string(), "1".to_string());
         ctx.deploy
             .variables
-            .insert("DOTNET_NOLOGO".to_string(), "1".to_string());
-        ctx.deploy
-            .variables
             .insert("ASPNETCORE_CONTENTROOT".to_string(), "/app/out".to_string());
+        ctx.deploy.variables.insert(
+            "DOTNET_ROOT".to_string(),
+            format!("/mise/installs/dotnet/{}", self.dotnet_version),
+        );
 
         // 运行时 APT 包
         ctx.deploy.add_apt_packages(&["libicu-dev".to_string()]);
 
         // deploy inputs: mise 层 + build 步骤输出
-        let mise_layer = ctx
-            .mise_step_builder
-            .as_ref()
-            .map(|m| m.get_layer())
-            .unwrap_or_default();
+        let mise_layer = Layer::new_step_layer(
+            &mise_step_name,
+            Some(Filter::include_only(vec![format!(
+                "/mise/installs/dotnet/{}",
+                self.dotnet_version
+            )])),
+        );
 
         let build_layer =
-            Layer::new_step_layer("build", Some(Filter::include_only(vec![".".to_string()])));
+            Layer::new_step_layer("build", Some(Filter::include_only(vec!["out".to_string()])));
 
         ctx.deploy.add_inputs(&[mise_layer, build_layer]);
 
@@ -391,7 +404,7 @@ mod tests {
         let mut ctx = make_ctx(&dir);
         let mut provider = DotnetProvider::new();
         provider.initialize(&mut ctx).unwrap();
-        assert_eq!(provider.dotnet_version, "9.0");
+        assert_eq!(provider.dotnet_version, "9.0.100");
     }
 
     #[test]
@@ -436,6 +449,6 @@ mod tests {
                 .map(|s| s.as_str()),
             Some("Production")
         );
-        assert!(ctx.caches.get_cache("nuget-packages").is_some());
+        assert!(ctx.caches.get_cache("nuget-packages").is_none());
     }
 }

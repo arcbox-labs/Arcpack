@@ -1,17 +1,16 @@
+pub mod docker_compose;
+pub mod http_check;
 /// 集成测试框架
 ///
 /// 扫描 `tests/fixtures/*/test.json`，为每个 fixture 运行端到端构建和验证。
 /// 需要 buildkitd + docker 运行环境。
-
 pub mod test_config;
-pub mod http_check;
-pub mod docker_compose;
 
 use std::path::Path;
 use std::process::Command;
 
-use arcpack::app::App;
 use arcpack::app::environment::Environment;
+use arcpack::app::App;
 use arcpack::config::Config;
 use arcpack::generate::GenerateContext;
 use arcpack::provider;
@@ -76,8 +75,7 @@ pub fn run_fixture_test(fixture_name: &str) -> Result<(), String> {
         .map_err(|e| format!("failed to load test.json: {}", e))?;
 
     // 2. 生成 BuildPlan
-    let app = App::new(&fixture_path)
-        .map_err(|e| format!("failed to create app: {}", e))?;
+    let app = App::new(&fixture_path).map_err(|e| format!("failed to create app: {}", e))?;
 
     let env_vars = config.envs.clone().unwrap_or_default();
     let env = Environment::new(env_vars);
@@ -86,25 +84,29 @@ pub fn run_fixture_test(fixture_name: &str) -> Result<(), String> {
 
     let mut provider_to_use: Option<Box<dyn provider::Provider>> = None;
     for p in provider::get_all_providers() {
-        if p.detect(&app, &env).map_err(|e| format!("detect error: {}", e))? {
+        if p.detect(&app, &env)
+            .map_err(|e| format!("detect error: {}", e))?
+        {
             provider_to_use = Some(p);
             break;
         }
     }
 
-    let mut provider_to_use = provider_to_use
-        .ok_or_else(|| "no provider matched".to_string())?;
+    let mut provider_to_use = provider_to_use.ok_or_else(|| "no provider matched".to_string())?;
 
     let version_resolver = Box::new(IntegrationVersionResolver);
     let mut ctx = GenerateContext::new(app, env, arcpack_config, version_resolver)
         .map_err(|e| format!("failed to create context: {}", e))?;
 
-    provider_to_use.initialize(&mut ctx)
+    provider_to_use
+        .initialize(&mut ctx)
         .map_err(|e| format!("initialize error: {}", e))?;
-    provider_to_use.plan(&mut ctx)
+    provider_to_use
+        .plan(&mut ctx)
         .map_err(|e| format!("plan error: {}", e))?;
 
-    let (mut plan, _resolved) = ctx.generate()
+    let (mut plan, _resolved) = ctx
+        .generate()
         .map_err(|e| format!("generate error: {}", e))?;
     provider_to_use.cleanse_plan(&mut plan);
 
@@ -115,7 +117,10 @@ pub fn run_fixture_test(fixture_name: &str) -> Result<(), String> {
 
     // 4. just_build 模式只验证 plan 生成成功
     if config.just_build.unwrap_or(false) {
-        println!("  [{}] plan generated successfully (justBuild)", fixture_name);
+        println!(
+            "  [{}] plan generated successfully (justBuild)",
+            fixture_name
+        );
         return Ok(());
     }
 
@@ -176,7 +181,5 @@ fn verify_expected_output(image_tag: &str, expected: &str) -> Result<(), String>
 
 /// 清理镜像
 fn cleanup_image(tag: &str) {
-    let _ = Command::new("docker")
-        .args(["rmi", "-f", tag])
-        .output();
+    let _ = Command::new("docker").args(["rmi", "-f", tag]).output();
 }

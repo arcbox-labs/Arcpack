@@ -95,10 +95,7 @@ fn test_plan_node_npm_outputs_json_with_schema_and_steps() {
         .args(["plan", &fixture_path("node-npm")])
         .assert()
         .success()
-        .stdout(
-            predicate::str::contains("$schema")
-                .and(predicate::str::contains("steps")),
-        );
+        .stdout(predicate::str::contains("$schema").and(predicate::str::contains("steps")));
 }
 
 #[test]

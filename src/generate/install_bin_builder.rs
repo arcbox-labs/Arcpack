@@ -7,7 +7,7 @@ use crate::Result;
 use super::{BuildStepOptions, StepBuilder};
 
 /// 容器内二进制安装目录
-pub const BIN_DIR: &str = "/arcpack";
+pub const BIN_DIR: &str = "/railpack";
 
 /// InstallBinBuilder：独立二进制安装步骤构建器
 ///
@@ -135,7 +135,7 @@ mod tests {
         let mut builder = InstallBinBuilder::new("packages:caddy");
         let pkg_ref = builder.default_package(&mut resolver, "caddy", "2");
         assert_eq!(pkg_ref.name, "caddy");
-        assert_eq!(builder.get_output_paths(), vec!["/arcpack/caddy"]);
+        assert_eq!(builder.get_output_paths(), vec!["/railpack/caddy"]);
     }
 
     #[test]
@@ -145,7 +145,10 @@ mod tests {
         builder.default_package(&mut resolver, "caddy", "2");
         let layer = builder.get_layer();
         assert_eq!(layer.step.as_deref(), Some("packages:caddy"));
-        assert!(layer.filter.include.contains(&"/arcpack/caddy".to_string()));
+        assert!(layer
+            .filter
+            .include
+            .contains(&"/railpack/caddy".to_string()));
     }
 
     #[test]

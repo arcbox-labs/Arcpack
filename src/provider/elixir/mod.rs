@@ -55,8 +55,6 @@ pub struct ElixirProvider {
     app_name: Option<String>,
     /// 是否为 Phoenix 应用
     is_phoenix: bool,
-    /// 是否有 assets 目录
-    has_assets: bool,
 }
 
 impl ElixirProvider {
@@ -66,7 +64,6 @@ impl ElixirProvider {
             erlang_version: DEFAULT_ERLANG_VERSION.to_string(),
             app_name: None,
             is_phoenix: false,
-            has_assets: false,
         }
     }
 
@@ -122,6 +119,32 @@ impl ElixirProvider {
         }
     }
 
+    fn get_env_vars() -> HashMap<String, String> {
+        HashMap::from([
+            ("LANG".to_string(), "en_US.UTF-8".to_string()),
+            ("LANGUAGE".to_string(), "en_US:en".to_string()),
+            ("LC_ALL".to_string(), "en_US.UTF-8".to_string()),
+            ("ELIXIR_ERL_OPTIONS".to_string(), "+fnu".to_string()),
+            ("MIX_ENV".to_string(), "prod".to_string()),
+            ("MIX_HOME".to_string(), "/root/.mix".to_string()),
+            (
+                "MIX_ARCHIVES".to_string(),
+                "/root/.mix/archives".to_string(),
+            ),
+        ])
+    }
+
+    fn install_output_paths() -> Vec<String> {
+        vec![
+            "deps".to_string(),
+            "_build".to_string(),
+            "config".to_string(),
+            "mix.exs".to_string(),
+            "mix.lock".to_string(),
+            "/root/.mix".to_string(),
+        ]
+    }
+
     fn get_command_step<'a>(
         steps: &'a mut [Box<dyn crate::generate::StepBuilder>],
         name: &str,
@@ -160,8 +183,14 @@ impl ElixirProvider {
             node.initialize(ctx)?;
             node.install_mise_packages(ctx)?;
 
+            let mise_step_name = ctx
+                .mise_step_builder
+                .as_ref()
+                .map(|m| m.name().to_string())
+                .unwrap_or_else(|| mise_step_builder::MISE_STEP_NAME.to_string());
+
             let install_node = ctx.new_command_step("install:node");
-            install_node.add_input(Layer::new_step_layer("install", None));
+            install_node.add_input(Layer::new_step_layer(&mise_step_name, None));
             node.install_node_deps(ctx, "install:node")?;
 
             // NodeProvider 以 assets 根目录为上下文生成了 copy 命令，这里将 src 改回项目根路径
@@ -233,7 +262,6 @@ impl Provider for ElixirProvider {
 
         // Phoenix 检测
         self.is_phoenix = Self::detect_phoenix(&ctx.app);
-        self.has_assets = ctx.app.has_file("assets/package.json") || ctx.app.has_match("assets");
 
         Ok(())
     }
@@ -269,9 +297,6 @@ impl Provider for ElixirProvider {
                 &self.erlang_version,
                 "resolved",
             );
-
-            // 构建依赖
-            mise.add_supporting_apt_package("build-essential");
         }
 
         let mise_step_name = ctx
@@ -279,18 +304,20 @@ impl Provider for ElixirProvider {
             .as_ref()
             .map(|m| m.name().to_string())
             .unwrap_or_else(|| mise_step_builder::MISE_STEP_NAME.to_string());
+        let install_output_paths = Self::install_output_paths();
+        let env_vars = Self::get_env_vars();
 
         // === install 步骤 ===
         let install = ctx.new_command_step("install");
         install.add_input(Layer::new_step_layer(&mise_step_name, None));
         {
             let install = Self::get_command_step(&mut ctx.steps, "install");
-
-            // Hex + Rebar
-            install.add_variables(&HashMap::from([
-                ("MIX_ENV".to_string(), "prod".to_string()),
-                ("MIX_HOME".to_string(), "/root/.mix".to_string()),
-            ]));
+            install.secrets = vec![];
+            install.use_secrets_with_prefix(&ctx.env, "MIX");
+            install.use_secrets_with_prefix(&ctx.env, "ERL");
+            install.use_secrets_with_prefix(&ctx.env, "ELIXIR");
+            install.use_secrets_with_prefix(&ctx.env, "OTP");
+            install.add_variables(&env_vars);
 
             // 预创建构建目录
             install.add_command(Command::new_exec("mkdir -p config deps _build"));
@@ -300,74 +327,60 @@ impl Provider for ElixirProvider {
 
             // 复制依赖文件
             install.add_command(Command::new_copy("mix.exs", "mix.exs"));
-            if ctx.app.has_file("mix.lock") {
-                install.add_command(Command::new_copy("mix.lock", "mix.lock"));
-            }
-            if ctx.app.has_match("config/**") {
-                install.add_command(Command::new_copy("config/", "config/"));
-            }
+            install.add_command(Command::new_copy("mix.lock", "mix.lock"));
 
             // 安装依赖
             install.add_command(Command::new_exec("mix deps.get --only prod"));
+            install.add_command(Command::new_copy("config/config.exs*", "config/"));
+            install.add_command(Command::new_copy("config/prod.exs*", "config/"));
             install.add_command(Command::new_exec("mix deps.compile"));
 
-            // secrets 前缀
-            install.use_secrets_with_prefix(&ctx.env, "MIX");
-            install.use_secrets_with_prefix(&ctx.env, "ERL");
-            install.use_secrets_with_prefix(&ctx.env, "ELIXIR");
-            install.use_secrets_with_prefix(&ctx.env, "OTP");
+            if let Ok(mix_content) = ctx.app.read_file("mix.exs") {
+                if mix_content.contains("assets.setup") {
+                    install.add_command(Command::new_exec("mix assets.setup"));
+                }
+            }
         }
 
-        // === Node.js 集成（assets/ 子目录）===
-        let has_assets_node = Self::install_node_assets(ctx)?;
-
         // === build 步骤 ===
-        let build_input = if has_assets_node {
-            "install:node"
-        } else {
-            "install"
-        };
         let build = ctx.new_command_step("build");
-        build.add_input(Layer::new_step_layer(build_input, None));
+        build.add_input(Layer::new_step_layer(&mise_step_name, None));
+        build.add_input(Layer::new_step_layer(
+            "install",
+            Some(Filter::include_only(install_output_paths)),
+        ));
         {
-            let local_layer = ctx.new_local_layer();
             let build = Self::get_command_step(&mut ctx.steps, "build");
-            build.add_input(local_layer);
-
-            build.add_variables(&HashMap::from([
-                ("MIX_ENV".to_string(), "prod".to_string()),
-                ("MIX_HOME".to_string(), "/root/.mix".to_string()),
-            ]));
+            build.add_variables(&env_vars);
+            build.add_command(Command::new_copy("priv*", "."));
+            build.add_command(Command::new_copy("lib*", "."));
+            build.add_command(Command::new_copy("assets*", "."));
+            build.add_command(Command::new_copy("config/runtime.exs*", "config/"));
 
             // 编译
             build.add_command(Command::new_exec("mix compile"));
 
-            // Phoenix 资产部署（检查 mix.exs 中是否定义了对应别名）
-            if self.is_phoenix {
-                if let Ok(mix_content) = ctx.app.read_file("mix.exs") {
-                    for alias in ["assets.setup", "assets.deploy", "ecto.deploy"] {
-                        if mix_content.contains(alias) {
-                            build.add_command(Command::new_exec(format!("mix {alias}")));
-                        }
+            if let Ok(mix_content) = ctx.app.read_file("mix.exs") {
+                for alias in ["assets.deploy", "ecto.deploy"] {
+                    if mix_content.contains(alias) {
+                        build.add_command(Command::new_exec(format!("mix {alias}")));
                     }
                 }
             }
 
+            build.add_command(Command::new_copy("rel*", "."));
             // Mix release
             build.add_command(Command::new_exec("mix release"));
         }
 
-        // 缓存
-        let cache_name = ctx.caches.add_cache("mix-deps", "/app/deps");
-        {
-            let install = Self::get_command_step(&mut ctx.steps, "install");
-            install.add_cache(&cache_name);
-        }
-
-        let cache_name = ctx.caches.add_cache("mix-build", "/app/_build");
-        {
+        // === Node.js 集成（assets/ 子目录）===
+        let has_assets_node = Self::install_node_assets(ctx)?;
+        if has_assets_node {
             let build = Self::get_command_step(&mut ctx.steps, "build");
-            build.add_cache(&cache_name);
+            build.add_input(Layer::new_step_layer(
+                "install:node",
+                Some(Filter::include_only(vec!["node_modules".to_string()])),
+            ));
         }
 
         // === Deploy 配置 ===
@@ -376,34 +389,17 @@ impl Provider for ElixirProvider {
             app_name, app_name
         ));
 
-        // Deploy 环境变量
-        let deploy_vars = HashMap::from([
-            ("LANG".to_string(), "en_US.UTF-8".to_string()),
-            ("LANGUAGE".to_string(), "en_US:en".to_string()),
-            ("LC_ALL".to_string(), "en_US.UTF-8".to_string()),
-            ("MIX_ENV".to_string(), "prod".to_string()),
-            ("MIX_HOME".to_string(), "/root/.mix".to_string()),
-            (
-                "MIX_ARCHIVES".to_string(),
-                "/root/.mix/archives".to_string(),
-            ),
-            ("ELIXIR_ERL_OPTIONS".to_string(), "+fnu".to_string()),
-        ]);
-        for (k, v) in deploy_vars {
-            ctx.deploy.variables.insert(k, v);
+        for (k, v) in &env_vars {
+            ctx.deploy.variables.insert(k.clone(), v.clone());
         }
 
-        // deploy inputs: mise 层 + build 步骤输出
-        let mise_layer = ctx
-            .mise_step_builder
-            .as_ref()
-            .map(|m| m.get_layer())
-            .unwrap_or_default();
+        // deploy inputs: release 输出
+        let build_layer = Layer::new_step_layer(
+            "build",
+            Some(Filter::include_only(vec!["_build/prod/rel".to_string()])),
+        );
 
-        let build_layer =
-            Layer::new_step_layer("build", Some(Filter::include_only(vec![".".to_string()])));
-
-        ctx.deploy.add_inputs(&[mise_layer, build_layer]);
+        ctx.deploy.add_inputs(&[build_layer]);
 
         Ok(())
     }
