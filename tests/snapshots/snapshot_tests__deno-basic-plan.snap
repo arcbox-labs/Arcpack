@@ -60,18 +60,9 @@ expression: plan
       ],
       "secrets": [
         "*"
-      ],
-      "caches": [
-        "deno-cache"
       ]
     }
   ],
-  "caches": {
-    "deno-cache": {
-      "directory": "/root/.cache",
-      "type": "shared"
-    }
-  },
   "deploy": {
     "base": {
       "image": "ghcr.io/railwayapp/railpack-runtime:latest"
@@ -89,7 +80,8 @@ expression: plan
       },
       {
         "include": [
-          "."
+          ".",
+          "/root/.cache"
         ],
         "step": "build"
       }

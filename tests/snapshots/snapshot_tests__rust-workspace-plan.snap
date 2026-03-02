@@ -49,25 +49,31 @@ expression: plan
       ],
       "commands": [
         {
-          "src": "Cargo.toml",
-          "dest": "Cargo.toml"
+          "src": "Cargo.toml*",
+          "dest": "."
+        },
+        {
+          "src": "Cargo.lock*",
+          "dest": "."
         }
       ],
       "secrets": [
         "*"
+      ],
+      "caches": [
+        "cargo_registry",
+        "cargo_git"
       ]
     },
     {
       "name": "build",
       "inputs": [
         {
+          "step": "packages:mise"
+        },
+        {
           "exclude": [
-            "/app/src",
-            "/app/benches",
-            "/app/examples"
-          ],
-          "include": [
-            "."
+            "/app/"
           ],
           "step": "install"
         },
@@ -80,19 +86,17 @@ expression: plan
       ],
       "commands": [
         {
-          "cmd": "cargo build --release"
+          "cmd": "mkdir -p bin"
         },
         {
-          "cmd": "mkdir -p bin"
+          "cmd": "cargo build --release --package crate-a"
+        },
+        {
+          "cmd": "cp target/release/crate-a bin"
         }
       ],
       "secrets": [
         "*"
-      ],
-      "caches": [
-        "cargo_registry",
-        "cargo_git",
-        "cargo_target"
       ]
     }
   ],
@@ -104,10 +108,6 @@ expression: plan
     "cargo_registry": {
       "directory": "/root/.cargo/registry",
       "type": "shared"
-    },
-    "cargo_target": {
-      "directory": "target",
-      "type": "locked"
     }
   },
   "deploy": {
@@ -125,6 +125,7 @@ expression: plan
         "step": "build"
       }
     ],
+    "startCommand": "./bin/crate-a",
     "variables": {
       "ROCKET_ADDRESS": "0.0.0.0"
     }

@@ -113,6 +113,14 @@ expression: plan
     }
   ],
   "caches": {
+    "apt": {
+      "directory": "/var/cache/apt",
+      "type": "locked"
+    },
+    "apt-lists": {
+      "directory": "/var/lib/apt/lists",
+      "type": "locked"
+    },
     "node-modules": {
       "directory": "/app/node_modules/.cache",
       "type": "shared"

@@ -50,9 +50,6 @@ expression: plan
       ],
       "commands": [
         {
-          "path": "/app/.venv/bin"
-        },
-        {
           "src": "pyproject.toml",
           "dest": "pyproject.toml"
         },
@@ -61,10 +58,26 @@ expression: plan
           "dest": "uv.lock"
         },
         {
+          "path": "/root/.local/bin"
+        },
+        {
+          "path": "/app/.venv/bin"
+        },
+        {
           "cmd": "uv sync --locked --no-dev --no-install-project"
         }
       ],
       "variables": {
+        "PIP_DEFAULT_TIMEOUT": "100",
+        "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONFAULTHANDLER": "1",
+        "PYTHONHASHSEED": "random",
+        "PYTHONUNBUFFERED": "1",
+        "UV_CACHE_DIR": "/opt/uv-cache",
+        "UV_COMPILE_BYTECODE": "1",
+        "UV_LINK_MODE": "copy",
+        "UV_PYTHON_DOWNLOADS": "never",
         "VIRTUAL_ENV": "/app/.venv"
       },
       "caches": [
@@ -117,7 +130,7 @@ expression: plan
       },
       {
         "include": [
-          ".venv"
+          "/app/.venv"
         ],
         "step": "build"
       },

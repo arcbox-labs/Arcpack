@@ -78,9 +78,13 @@ impl JavaProvider {
     /// 获取 StartCmd
     fn get_start_command(&self) -> String {
         match (&self.build_tool, self.is_spring_boot) {
-            (BuildTool::Gradle, true) => "java $JAVA_OPTS -jar -Dserver.port=$PORT $(ls -1 */build/libs/*jar | grep -v plain)".to_string(),
+            (BuildTool::Gradle, true) => {
+                // 先尝试子目录 jar（多模块），回退到根 build/libs
+                "java $JAVA_OPTS -Dserver.port=$PORT -jar $(ls -1 */build/libs/*jar build/libs/*jar 2>/dev/null | grep -v plain | head -1)"
+                    .to_string()
+            }
             (BuildTool::Gradle, false) => {
-                "java $JAVA_OPTS -jar $(ls -1 */build/libs/*jar | grep -v plain)".to_string()
+                "java $JAVA_OPTS -jar $(ls -1 */build/libs/*jar build/libs/*jar 2>/dev/null | grep -v plain | head -1)".to_string()
             }
             (BuildTool::Maven, true) => {
                 "java -Dserver.port=$PORT $JAVA_OPTS -jar target/*jar".to_string()

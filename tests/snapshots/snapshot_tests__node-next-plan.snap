@@ -98,9 +98,12 @@ expression: plan
       "secrets": [
         "*"
       ],
+      "variables": {
+        "NEXT_TELEMETRY_DISABLED": "1"
+      },
       "caches": [
         "node-modules",
-        "next-cache"
+        "next"
       ]
     },
     {
@@ -123,7 +126,15 @@ expression: plan
     }
   ],
   "caches": {
-    "next-cache": {
+    "apt": {
+      "directory": "/var/cache/apt",
+      "type": "locked"
+    },
+    "apt-lists": {
+      "directory": "/var/lib/apt/lists",
+      "type": "locked"
+    },
+    "next": {
       "directory": "/app/.next/cache",
       "type": "shared"
     },
@@ -169,7 +180,7 @@ expression: plan
         "step": "build"
       }
     ],
-    "startCommand": "npm start",
+    "startCommand": "npm run start",
     "variables": {
       "CI": "true",
       "NODE_ENV": "production",

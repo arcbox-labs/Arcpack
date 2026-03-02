@@ -41,6 +41,31 @@ expression: plan
       }
     },
     {
+      "name": "build",
+      "inputs": [
+        {
+          "step": "packages:mise"
+        },
+        {
+          "include": [
+            "."
+          ],
+          "local": true
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "mvn -DoutputFile=target/mvn-dependency-list.log -B -DskipTests clean dependency:list install -Pproduction"
+        }
+      ],
+      "secrets": [
+        "*"
+      ],
+      "caches": [
+        "maven"
+      ]
+    },
+    {
       "name": "packages:mise:runtime",
       "inputs": [
         {
@@ -75,31 +100,6 @@ expression: plan
         "MISE_SHIMS_DIR": "/mise/shims",
         "MISE_TRUSTED_CONFIG_PATHS": "/app"
       }
-    },
-    {
-      "name": "build",
-      "inputs": [
-        {
-          "step": "packages:mise"
-        },
-        {
-          "include": [
-            "."
-          ],
-          "local": true
-        }
-      ],
-      "commands": [
-        {
-          "cmd": "mvn -DoutputFile=target/mvn-dependency-list.log -B -DskipTests clean dependency:list install -Pproduction"
-        }
-      ],
-      "secrets": [
-        "*"
-      ],
-      "caches": [
-        "maven"
-      ]
     }
   ],
   "caches": {
@@ -125,7 +125,7 @@ expression: plan
       },
       {
         "include": [
-          "."
+          "target/."
         ],
         "step": "build"
       }

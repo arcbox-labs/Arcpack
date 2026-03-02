@@ -104,25 +104,6 @@ expression: plan
       ]
     },
     {
-      "name": "packages:caddy",
-      "inputs": [
-        {
-          "image": "ghcr.io/railwayapp/railpack-builder:latest"
-        }
-      ],
-      "commands": [
-        {
-          "cmd": "mise install-into caddy@2.0.0 /arcpack/caddy"
-        },
-        {
-          "path": "/arcpack/caddy"
-        },
-        {
-          "path": "/arcpack/caddy/bin"
-        }
-      ]
-    },
-    {
       "name": "packages:apt:runtime",
       "inputs": [
         {
@@ -142,6 +123,14 @@ expression: plan
     }
   ],
   "caches": {
+    "apt": {
+      "directory": "/var/cache/apt",
+      "type": "locked"
+    },
+    "apt-lists": {
+      "directory": "/var/lib/apt/lists",
+      "type": "locked"
+    },
     "node-modules": {
       "directory": "/app/node_modules/.cache",
       "type": "shared"
@@ -162,28 +151,39 @@ expression: plan
     "inputs": [
       {
         "include": [
-          "/arcpack/caddy"
+          "/mise/shims",
+          "/mise/installs",
+          "/usr/local/bin/mise",
+          "/etc/mise/config.toml",
+          "/root/.local/state/mise"
         ],
-        "step": "packages:caddy"
+        "step": "packages:mise"
       },
       {
         "include": [
-          "build/client"
+          "/app/node_modules"
+        ],
+        "step": "build"
+      },
+      {
+        "exclude": [
+          "node_modules",
+          ".yarn"
+        ],
+        "include": [
+          "/root/.cache",
+          "."
         ],
         "step": "build"
       }
     ],
-    "startCommand": "caddy run --config /app/Caddyfile --adapter caddyfile",
+    "startCommand": "npm run start",
     "variables": {
       "CI": "true",
       "NODE_ENV": "production",
       "NPM_CONFIG_FUND": "false",
       "NPM_CONFIG_PRODUCTION": "false",
       "NPM_CONFIG_UPDATE_NOTIFIER": "false"
-    },
-    "paths": [
-      "/arcpack/caddy",
-      "/arcpack/caddy/bin"
-    ]
+    }
   }
 }
