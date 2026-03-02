@@ -1,11 +1,10 @@
 /// prepare 命令 —— 准备构建产物文件
 ///
 /// 对齐 railpack `cli/prepare.go`
-
 use super::common::{
-    CommonBuildArgs, generate_build_result_for_command, add_schema_to_plan_json, write_json_file,
+    add_schema_to_plan_json, generate_build_result_for_command, write_json_file, CommonBuildArgs,
 };
-use super::pretty_print::{PrintOptions, OutputStream, pretty_print_build_result};
+use super::pretty_print::{pretty_print_build_result, OutputStream, PrintOptions};
 
 /// Prepare 命令参数
 #[derive(Debug, clap::Args)]
@@ -49,7 +48,11 @@ pub fn run_prepare(args: &PrepareArgs) -> crate::Result<bool> {
 
     // 统一计算 plan JSON（避免 --show-plan 和 --plan-out 重复调用）
     let plan_json = if args.show_plan || args.plan_out.is_some() {
-        result.plan.as_ref().map(add_schema_to_plan_json).transpose()?
+        result
+            .plan
+            .as_ref()
+            .map(add_schema_to_plan_json)
+            .transpose()?
     } else {
         None
     };

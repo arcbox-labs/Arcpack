@@ -4,14 +4,11 @@
 //! 核心逻辑：判断多个 Layer 是否可以 merge（高效但不能重叠），
 //! 还是必须逐层 copy（安全但可能冗余）。
 
+use std::collections::HashMap;
 use std::path::Path;
 
-#[cfg(feature = "llb")]
-use std::collections::HashMap;
-#[cfg(feature = "llb")]
-use crate::buildkit::llb::{self, OperationOutput};
-#[cfg(feature = "llb")]
 use super::step_node::StepNode;
+use crate::buildkit::llb::{self, OperationOutput};
 
 use crate::plan::{Filter, Layer};
 
@@ -156,24 +153,23 @@ pub fn has_significant_overlap(l1: &Layer, l2: &Layer) -> bool {
             let p1_with_slash = format!("{}/", p1_clean);
             let p2_with_slash = format!("{}/", p2_clean);
 
-            let (overlap, rel_path, outer_excludes) =
-                if p1_with_slash.starts_with(&p2_with_slash) {
-                    // p1 在 p2 内部（如 /app/.nvmrc 在 /app 内）
-                    let rel = p1_clean
-                        .strip_prefix(&p2_clean)
-                        .unwrap_or("")
-                        .trim_start_matches('/');
-                    (true, rel.to_string(), &l2.filter.exclude)
-                } else if p2_with_slash.starts_with(&p1_with_slash) {
-                    // p2 在 p1 内部
-                    let rel = p2_clean
-                        .strip_prefix(&p1_clean)
-                        .unwrap_or("")
-                        .trim_start_matches('/');
-                    (true, rel.to_string(), &l1.filter.exclude)
-                } else {
-                    (false, String::new(), &l1.filter.exclude)
-                };
+            let (overlap, rel_path, outer_excludes) = if p1_with_slash.starts_with(&p2_with_slash) {
+                // p1 在 p2 内部（如 /app/.nvmrc 在 /app 内）
+                let rel = p1_clean
+                    .strip_prefix(&p2_clean)
+                    .unwrap_or("")
+                    .trim_start_matches('/');
+                (true, rel.to_string(), &l2.filter.exclude)
+            } else if p2_with_slash.starts_with(&p1_with_slash) {
+                // p2 在 p1 内部
+                let rel = p2_clean
+                    .strip_prefix(&p1_clean)
+                    .unwrap_or("")
+                    .trim_start_matches('/');
+                (true, rel.to_string(), &l1.filter.exclude)
+            } else {
+                (false, String::new(), &l1.filter.exclude)
+            };
 
             if overlap {
                 // 检查相对路径是否被 exclude 覆盖
@@ -287,10 +283,7 @@ fn get_merge_state(layers: &[Layer], step_name: &str) -> LayerResult {
 
     // 第一个 layer 可能有 filter
     if !layers[0].filter.include.is_empty() {
-        let from_ref = layers[0]
-            .step
-            .as_deref()
-            .map(sanitize_stage_name);
+        let from_ref = layers[0].step.as_deref().map(sanitize_stage_name);
         let copies = copy_layer_paths(
             from_ref.as_deref(),
             &layers[0].filter,
@@ -302,7 +295,11 @@ fn get_merge_state(layers: &[Layer], step_name: &str) -> LayerResult {
     // 后续 layers 的文件 COPY 进来
     for layer in &layers[1..] {
         let from_ref = sanitize_layer_ref(layer);
-        let copies = copy_layer_paths(from_ref.as_deref(), &layer.filter, layer.local == Some(true));
+        let copies = copy_layer_paths(
+            from_ref.as_deref(),
+            &layer.filter,
+            layer.local == Some(true),
+        );
         copy_instructions.extend(copies);
     }
 
@@ -349,7 +346,6 @@ fn sanitize_layer_ref(layer: &Layer) -> Option<String> {
 ///
 /// 对齐 Dockerfile 版本 `get_full_state_from_layers()`，但输出为 LLB 状态。
 /// 根据 should_merge() 决定使用 merge 或 copy 策略。
-#[cfg(feature = "llb")]
 pub fn get_full_state_from_layers_llb(
     layers: &[Layer],
     step_nodes: &HashMap<String, &StepNode>,
@@ -371,18 +367,17 @@ pub fn get_full_state_from_layers_llb(
 }
 
 /// 单个 Layer 转换为 LLB 状态
-#[cfg(feature = "llb")]
 fn layer_to_llb_state(
     layer: &Layer,
     step_nodes: &HashMap<String, &StepNode>,
 ) -> crate::Result<OperationOutput> {
     if let Some(ref step_name) = layer.step {
-        let node = step_nodes.get(step_name.as_str()).ok_or_else(|| {
-            anyhow::anyhow!("layer 引用不存在的 step: {}", step_name)
-        })?;
-        node.get_llb_state().cloned().ok_or_else(|| {
-            anyhow::anyhow!("step {} 尚未生成 llb_state", step_name)
-        }.into())
+        let node = step_nodes
+            .get(step_name.as_str())
+            .ok_or_else(|| anyhow::anyhow!("layer 引用不存在的 step: {}", step_name))?;
+        node.get_llb_state()
+            .cloned()
+            .ok_or_else(|| { anyhow::anyhow!("step {} 尚未生成 llb_state", step_name) }.into())
     } else if let Some(ref image_name) = layer.image {
         Ok(llb::image(image_name))
     } else if layer.local == Some(true) {
@@ -396,7 +391,6 @@ fn layer_to_llb_state(
 ///
 /// 无 filter → 直接返回 layer state
 /// 有 filter → copy 指定路径到 base_image
-#[cfg(feature = "llb")]
 fn convert_single_layer_llb(
     layer: &Layer,
     step_nodes: &HashMap<String, &StepNode>,
@@ -422,7 +416,6 @@ fn convert_single_layer_llb(
 ///
 /// BuildKit MergeOp 要求每个输入是 diff（增量层），不是 full state。
 /// 因此后续层必须 copy 到 scratch 而非直接使用 full state。
-#[cfg(feature = "llb")]
 fn merge_layers_llb(
     layers: &[Layer],
     step_nodes: &HashMap<String, &StepNode>,
@@ -472,7 +465,6 @@ fn merge_layers_llb(
 }
 
 /// Copy 策略：首层为基，后续层逐路径 copy 叠加
-#[cfg(feature = "llb")]
 fn copy_layers_llb(
     layers: &[Layer],
     step_nodes: &HashMap<String, &StepNode>,
@@ -558,10 +550,7 @@ mod tests {
     fn test_should_merge_significant_overlap_false() {
         // 对齐 railpack "overlapping include" 用例
         let layers = vec![
-            Layer::new_step_layer(
-                "build",
-                Some(Filter::include_only(vec![".".to_string()])),
-            ),
+            Layer::new_step_layer("build", Some(Filter::include_only(vec![".".to_string()]))),
             Layer::new_step_layer(
                 "build",
                 Some(Filter::include_only(vec![
@@ -598,9 +587,7 @@ mod tests {
         let layers = vec![
             Layer::new_step_layer(
                 "install",
-                Some(Filter::include_only(vec![
-                    "/app/node_modules".to_string(),
-                ])),
+                Some(Filter::include_only(vec!["/app/node_modules".to_string()])),
             ),
             Layer::new_step_layer(
                 "build",
@@ -623,9 +610,7 @@ mod tests {
         let layers = vec![
             Layer::new_step_layer(
                 "install",
-                Some(Filter::include_only(vec![
-                    "/app/node_modules".to_string(),
-                ])),
+                Some(Filter::include_only(vec!["/app/node_modules".to_string()])),
             ),
             Layer::new_step_layer(
                 "build",
@@ -645,7 +630,7 @@ mod tests {
             Layer::new_step_layer(
                 "install",
                 Some(Filter::include_only(vec![
-                    "/app/node_modules/.cache".to_string(),
+                    "/app/node_modules/.cache".to_string()
                 ])),
             ),
             Layer::new_step_layer(
@@ -789,9 +774,7 @@ mod tests {
         // 重叠但被 exclude 覆盖 → 不算显著重叠
         let l1 = Layer::new_step_layer(
             "install",
-            Some(Filter::include_only(vec![
-                "/app/node_modules".to_string(),
-            ])),
+            Some(Filter::include_only(vec!["/app/node_modules".to_string()])),
         );
         let l2 = Layer::new_step_layer(
             "build",
@@ -912,10 +895,7 @@ mod tests {
 
     #[test]
     fn test_copy_layer_paths_multiple_includes() {
-        let filter = Filter::include_only(vec![
-            "/app/dist".to_string(),
-            "/app/static".to_string(),
-        ]);
+        let filter = Filter::include_only(vec!["/app/dist".to_string(), "/app/static".to_string()]);
         let copies = copy_layer_paths(Some("build"), &filter, false);
         assert_eq!(copies.len(), 2);
         assert_eq!(copies[0], "COPY --from=build /app/dist /app/dist");
@@ -973,7 +953,6 @@ mod tests {
 
     // === LLB 策略测试 ===
 
-    #[cfg(feature = "llb")]
     mod llb_tests {
         use super::*;
         use crate::buildkit::llb::source::image;
@@ -991,11 +970,7 @@ mod tests {
         #[test]
         fn test_layers_llb_empty_returns_base() {
             let base = image("ubuntu:22.04");
-            let result = get_full_state_from_layers_llb(
-                &[],
-                &HashMap::new(),
-                &base,
-            ).unwrap();
+            let result = get_full_state_from_layers_llb(&[], &HashMap::new(), &base).unwrap();
             assert_eq!(result.serialized_op.digest, base.serialized_op.digest);
         }
 
@@ -1017,11 +992,7 @@ mod tests {
         fn test_layers_llb_single_image() {
             let layers = vec![Layer::new_image_layer("node:20", None)];
             let base = image("ubuntu:22.04");
-            let result = get_full_state_from_layers_llb(
-                &layers,
-                &HashMap::new(),
-                &base,
-            ).unwrap();
+            let result = get_full_state_from_layers_llb(&layers, &HashMap::new(), &base).unwrap();
             // 无 filter → 返回 image 状态
             let expected = image("node:20");
             assert_eq!(result.serialized_op.digest, expected.serialized_op.digest);
@@ -1049,15 +1020,19 @@ mod tests {
             let nodes: HashMap<String, &StepNode> = [
                 ("install".to_string(), &node1),
                 ("build".to_string(), &node2),
-            ].into_iter().collect();
+            ]
+            .into_iter()
+            .collect();
 
             let layers = vec![
-                Layer::new_step_layer("install", Some(Filter::include_only(
-                    vec!["/app/node_modules".to_string()],
-                ))),
-                Layer::new_step_layer("build", Some(Filter::include_only(
-                    vec!["/root/.cache".to_string()],
-                ))),
+                Layer::new_step_layer(
+                    "install",
+                    Some(Filter::include_only(vec!["/app/node_modules".to_string()])),
+                ),
+                Layer::new_step_layer(
+                    "build",
+                    Some(Filter::include_only(vec!["/root/.cache".to_string()])),
+                ),
             ];
             assert!(should_merge(&layers), "层不重叠应使用 merge");
 
@@ -1074,7 +1049,9 @@ mod tests {
             let nodes: HashMap<String, &StepNode> = [
                 ("install".to_string(), &node1),
                 ("build".to_string(), &node2),
-            ].into_iter().collect();
+            ]
+            .into_iter()
+            .collect();
 
             let layers = vec![
                 Layer::new_step_layer("install", None),
@@ -1091,11 +1068,7 @@ mod tests {
         fn test_layer_to_llb_state_missing_step_errors() {
             let layers = vec![Layer::new_step_layer("nonexistent", None)];
             let base = image("ubuntu:22.04");
-            let result = get_full_state_from_layers_llb(
-                &layers,
-                &HashMap::new(),
-                &base,
-            );
+            let result = get_full_state_from_layers_llb(&layers, &HashMap::new(), &base);
             assert!(result.is_err(), "引用不存在的 step 应返回错误");
         }
 

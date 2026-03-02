@@ -52,12 +52,7 @@ pub fn copy_with_opts(
 /// 创建文件
 ///
 /// 对齐 Go `llb.Mkfile(path, mode, content)`
-pub fn make_file(
-    dest: OperationOutput,
-    path: &str,
-    content: &[u8],
-    mode: i32,
-) -> OperationOutput {
+pub fn make_file(dest: OperationOutput, path: &str, content: &[u8], mode: i32) -> OperationOutput {
     let inputs = vec![dest.clone()];
 
     let file_action = pb::FileAction {

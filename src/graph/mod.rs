@@ -79,10 +79,7 @@ impl<T: Node> Graph<T> {
 
     /// 获取指定节点的子节点列表，不存在则返回空切片
     pub fn get_children(&self, name: &str) -> &[String] {
-        self.children
-            .get(name)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
+        self.children.get(name).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
     /// 拓扑排序，返回处理顺序（父节点在前，叶节点在后）
@@ -170,11 +167,7 @@ impl<T: Node> Graph<T> {
         let node_names: Vec<String> = self.nodes.keys().cloned().collect();
 
         for node_name in &node_names {
-            let current_parents = self
-                .parents
-                .get(node_name)
-                .cloned()
-                .unwrap_or_default();
+            let current_parents = self.parents.get(node_name).cloned().unwrap_or_default();
 
             let mut redundant_parents: Vec<String> = Vec::new();
 

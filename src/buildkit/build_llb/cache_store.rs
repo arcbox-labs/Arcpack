@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-#[cfg(feature = "llb")]
 use crate::buildkit::llb::exec::{CacheSharingMode, MountSpec};
 use crate::plan::{Cache, CacheType};
 
@@ -56,7 +55,6 @@ impl BuildKitCacheStore {
     /// 生成 LLB 缓存挂载规格
     ///
     /// 返回 `MountSpec::Cache`，包含目标路径、缓存键和共享模式
-    #[cfg(feature = "llb")]
     pub fn get_cache_mount_spec(&mut self, key: &str, plan_cache: &Cache) -> MountSpec {
         let cache = self.get_cache(key, plan_cache);
         MountSpec::Cache {
@@ -122,7 +120,6 @@ mod tests {
         assert_eq!(result.cache_key, "npm");
     }
 
-    #[cfg(feature = "llb")]
     #[test]
     fn test_cache_mount_spec_shared() {
         use crate::buildkit::llb::exec::{CacheSharingMode, MountSpec};
@@ -130,7 +127,11 @@ mod tests {
         let cache = Cache::new("/root/.npm");
         let spec = store.get_cache_mount_spec("npm", &cache);
         match spec {
-            MountSpec::Cache { target, cache_id, sharing } => {
+            MountSpec::Cache {
+                target,
+                cache_id,
+                sharing,
+            } => {
                 assert_eq!(target, "/root/.npm");
                 assert_eq!(cache_id, "app-npm");
                 assert!(matches!(sharing, CacheSharingMode::Shared));
@@ -139,7 +140,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "llb")]
     #[test]
     fn test_cache_mount_spec_locked() {
         use crate::buildkit::llb::exec::{CacheSharingMode, MountSpec};
@@ -154,7 +154,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "llb")]
     #[test]
     fn test_cache_mount_spec_prefix() {
         use crate::buildkit::llb::exec::MountSpec;
@@ -170,7 +169,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "llb")]
     #[test]
     fn test_cache_mount_spec_empty_unique_id() {
         use crate::buildkit::llb::exec::MountSpec;

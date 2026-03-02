@@ -1,0 +1,143 @@
+---
+source: tests/snapshot_tests.rs
+expression: plan
+---
+{
+  "steps": [
+    {
+      "name": "packages:mise",
+      "inputs": [
+        {
+          "image": "ghcr.io/railwayapp/railpack-builder:latest"
+        }
+      ],
+      "commands": [
+        {
+          "path": "/mise/shims"
+        },
+        {
+          "path": "/etc/mise/config.toml",
+          "name": "mise.toml",
+          "customName": "create mise config"
+        },
+        {
+          "cmd": "mise install",
+          "customName": "install mise packages: dotnet"
+        }
+      ],
+      "assets": {
+        "mise.toml": "[tools.dotnet]\nversion = \"8.0.0.0\"\n"
+      },
+      "variables": {
+        "MISE_CACHE_DIR": "/mise/cache",
+        "MISE_CONFIG_DIR": "/mise",
+        "MISE_DATA_DIR": "/mise",
+        "MISE_IDIOMATIC_VERSION_FILE_ENABLE_TOOLS": "python,node,ruby,elixir,go,java,yarn",
+        "MISE_INSTALLS_DIR": "/mise/installs",
+        "MISE_NODE_VERIFY": "false",
+        "MISE_PARANOID": "1",
+        "MISE_SHIMS_DIR": "/mise/shims",
+        "MISE_TRUSTED_CONFIG_PATHS": "/app"
+      }
+    },
+    {
+      "name": "install",
+      "inputs": [
+        {
+          "step": "packages:mise"
+        }
+      ],
+      "commands": [
+        {
+          "src": "MyApp.csproj",
+          "dest": "MyApp.csproj"
+        },
+        {
+          "cmd": "dotnet restore"
+        }
+      ],
+      "secrets": [
+        "*"
+      ],
+      "caches": [
+        "nuget-packages"
+      ]
+    },
+    {
+      "name": "build",
+      "inputs": [
+        {
+          "step": "install"
+        },
+        {
+          "include": [
+            "."
+          ],
+          "local": true
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "dotnet publish --no-restore -c Release -o out"
+        }
+      ],
+      "secrets": [
+        "*"
+      ]
+    },
+    {
+      "name": "packages:apt:runtime",
+      "inputs": [
+        {
+          "image": "ghcr.io/railwayapp/railpack-runtime:latest"
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "sh -c 'apt-get update && apt-get install -y libicu-dev'",
+          "customName": "install apt packages: libicu-dev"
+        }
+      ],
+      "caches": [
+        "apt",
+        "apt-lists"
+      ]
+    }
+  ],
+  "caches": {
+    "nuget-packages": {
+      "directory": "/root/.nuget/packages",
+      "type": "shared"
+    }
+  },
+  "deploy": {
+    "base": {
+      "step": "packages:apt:runtime"
+    },
+    "inputs": [
+      {
+        "include": [
+          "/mise/shims",
+          "/mise/installs",
+          "/usr/local/bin/mise",
+          "/etc/mise/config.toml",
+          "/root/.local/state/mise"
+        ],
+        "step": "packages:mise"
+      },
+      {
+        "include": [
+          "."
+        ],
+        "step": "build"
+      }
+    ],
+    "startCommand": "ASPNETCORE_URLS=http://0.0.0.0:${PORT:-3000} ./out/MyApp",
+    "variables": {
+      "ASPNETCORE_CONTENTROOT": "/app/out",
+      "ASPNETCORE_ENVIRONMENT": "Production",
+      "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
+      "DOTNET_NOLOGO": "1"
+    }
+  }
+}

@@ -53,10 +53,7 @@ impl InstallBinBuilder {
         if paths.is_empty() {
             return Layer::default();
         }
-        Layer::new_step_layer(
-            &self.display_name,
-            Some(Filter::include_only(paths)),
-        )
+        Layer::new_step_layer(&self.display_name, Some(Filter::include_only(paths)))
     }
 
     fn get_bin_path(&self) -> String {
@@ -74,13 +71,18 @@ impl StepBuilder for InstallBinBuilder {
     }
 
     fn build(&self, plan: &mut BuildPlan, options: &mut BuildStepOptions) -> Result<()> {
-        let pkg = self.package.as_ref()
+        let pkg = self
+            .package
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("InstallBinBuilder: no package set"))?;
 
-        let resolved = options.resolved_packages.get(&pkg.name)
-            .ok_or_else(|| anyhow::anyhow!("package {} not found in resolved packages", pkg.name))?;
+        let resolved = options.resolved_packages.get(&pkg.name).ok_or_else(|| {
+            anyhow::anyhow!("package {} not found in resolved packages", pkg.name)
+        })?;
 
-        let version = resolved.resolved_version.as_ref()
+        let version = resolved
+            .resolved_version
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("package {} has no resolved version", pkg.name))?;
 
         let mut step = Step::new(&self.display_name);
@@ -112,10 +114,10 @@ impl StepBuilder for InstallBinBuilder {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use super::*;
     use super::super::cache_context::CacheContext;
+    use super::*;
     use crate::resolver::{ResolvedPackage, VersionResolver};
+    use std::collections::HashMap;
 
     struct MockResolver;
     impl VersionResolver for MockResolver {

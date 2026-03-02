@@ -121,9 +121,10 @@ impl PackageManagerKind {
             }
             PackageManagerKind::Pnpm => {
                 if !using_corepack {
-                    install.add_variables(&HashMap::from([
-                        ("PNPM_HOME".to_string(), "/pnpm".to_string()),
-                    ]));
+                    install.add_variables(&HashMap::from([(
+                        "PNPM_HOME".to_string(),
+                        "/pnpm".to_string(),
+                    )]));
                     install.add_paths(&["/pnpm".to_string()]);
                     install.add_command(Command::new_exec("pnpm add -g node-gyp"));
                 }
@@ -175,7 +176,12 @@ impl PackageManagerKind {
                 // engines 字段优先
                 if let Some(engine_version) = package_json.engines.get("pnpm") {
                     if !engine_version.is_empty() {
-                        mise_step.version(resolver, &pnpm, engine_version, "package.json > engines > pnpm");
+                        mise_step.version(
+                            resolver,
+                            &pnpm,
+                            engine_version,
+                            "package.json > engines > pnpm",
+                        );
                     }
                 }
 
@@ -191,12 +197,21 @@ impl PackageManagerKind {
                 }
 
                 if pm_name == "pnpm" && !pm_version.is_empty() {
-                    mise_step.version(resolver, &pnpm, &pm_version, "package.json > packageManager");
+                    mise_step.version(
+                        resolver,
+                        &pnpm,
+                        &pm_version,
+                        "package.json > packageManager",
+                    );
                     mise_step.skip_mise_install(resolver, &pnpm);
                 }
             }
             PackageManagerKind::Yarn1 | PackageManagerKind::YarnBerry => {
-                let default_major = if *self == PackageManagerKind::Yarn1 { "1" } else { "2" };
+                let default_major = if *self == PackageManagerKind::Yarn1 {
+                    "1"
+                } else {
+                    "2"
+                };
                 let yarn = mise_step.default_package(resolver, "yarn", default_major);
 
                 if *self == PackageManagerKind::Yarn1 {
@@ -206,14 +221,24 @@ impl PackageManagerKind {
 
                 if let Some(engine_version) = package_json.engines.get("yarn") {
                     if !engine_version.is_empty() {
-                        mise_step.version(resolver, &yarn, engine_version, "package.json > engines > yarn");
+                        mise_step.version(
+                            resolver,
+                            &yarn,
+                            engine_version,
+                            "package.json > engines > yarn",
+                        );
                     }
                 }
 
                 if pm_name == "yarn" && !pm_version.is_empty() {
                     let major = pm_version.split('.').next().unwrap_or("1");
                     let yarn = mise_step.default_package(resolver, "yarn", major);
-                    mise_step.version(resolver, &yarn, &pm_version, "package.json > packageManager");
+                    mise_step.version(
+                        resolver,
+                        &yarn,
+                        &pm_version,
+                        "package.json > packageManager",
+                    );
                     mise_step.skip_mise_install(resolver, &yarn);
                 }
             }
@@ -222,7 +247,12 @@ impl PackageManagerKind {
 
                 if let Some(engine_version) = package_json.engines.get("bun") {
                     if !engine_version.is_empty() {
-                        mise_step.version(resolver, &bun, engine_version, "package.json > engines > bun");
+                        mise_step.version(
+                            resolver,
+                            &bun,
+                            engine_version,
+                            "package.json > engines > bun",
+                        );
                     }
                 }
 
@@ -327,8 +357,14 @@ mod tests {
 
     #[test]
     fn test_run_script_command() {
-        assert_eq!(PackageManagerKind::Npm.run_script_command("index.js"), "node index.js");
-        assert_eq!(PackageManagerKind::Bun.run_script_command("index.ts"), "bun index.ts");
+        assert_eq!(
+            PackageManagerKind::Npm.run_script_command("index.js"),
+            "node index.js"
+        );
+        assert_eq!(
+            PackageManagerKind::Bun.run_script_command("index.ts"),
+            "bun index.ts"
+        );
     }
 
     #[test]
@@ -341,21 +377,38 @@ mod tests {
 
     #[test]
     fn test_parse_yarn_package_manager() {
-        assert_eq!(parse_yarn_package_manager("1.22.0"), PackageManagerKind::Yarn1);
-        assert_eq!(parse_yarn_package_manager("2.0.0"), PackageManagerKind::YarnBerry);
-        assert_eq!(parse_yarn_package_manager("4.0.0"), PackageManagerKind::YarnBerry);
+        assert_eq!(
+            parse_yarn_package_manager("1.22.0"),
+            PackageManagerKind::Yarn1
+        );
+        assert_eq!(
+            parse_yarn_package_manager("2.0.0"),
+            PackageManagerKind::YarnBerry
+        );
+        assert_eq!(
+            parse_yarn_package_manager("4.0.0"),
+            PackageManagerKind::YarnBerry
+        );
     }
 
     #[test]
     fn test_cache_type() {
         assert_eq!(PackageManagerKind::Npm.cache_type(), CacheType::Shared);
         assert_eq!(PackageManagerKind::Yarn1.cache_type(), CacheType::Locked);
-        assert_eq!(PackageManagerKind::YarnBerry.cache_type(), CacheType::Shared);
+        assert_eq!(
+            PackageManagerKind::YarnBerry.cache_type(),
+            CacheType::Shared
+        );
     }
 
     /// 辅助函数：将 commands 序列化为可搜索字符串
     fn commands_debug_str(install: &CommandStepBuilder) -> String {
-        install.commands.iter().map(|c| format!("{:?}", c)).collect::<Vec<_>>().join(" ")
+        install
+            .commands
+            .iter()
+            .map(|c| format!("{:?}", c))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     #[test]
@@ -368,7 +421,10 @@ mod tests {
         let mut install = CommandStepBuilder::new("install");
         PackageManagerKind::Bun.install_deps(&app, &mut caches, &mut install, false);
 
-        assert!(commands_debug_str(&install).contains("--frozen-lockfile"), "应使用 --frozen-lockfile");
+        assert!(
+            commands_debug_str(&install).contains("--frozen-lockfile"),
+            "应使用 --frozen-lockfile"
+        );
     }
 
     #[test]
@@ -380,7 +436,10 @@ mod tests {
         let mut install = CommandStepBuilder::new("install");
         PackageManagerKind::Bun.install_deps(&app, &mut caches, &mut install, false);
 
-        assert!(!commands_debug_str(&install).contains("--frozen-lockfile"), "无锁文件时不应使用 --frozen-lockfile");
+        assert!(
+            !commands_debug_str(&install).contains("--frozen-lockfile"),
+            "无锁文件时不应使用 --frozen-lockfile"
+        );
     }
 
     #[test]
@@ -393,7 +452,10 @@ mod tests {
         let mut install = CommandStepBuilder::new("install");
         PackageManagerKind::Yarn1.install_deps(&app, &mut caches, &mut install, false);
 
-        assert!(commands_debug_str(&install).contains("--frozen-lockfile"), "应使用 --frozen-lockfile");
+        assert!(
+            commands_debug_str(&install).contains("--frozen-lockfile"),
+            "应使用 --frozen-lockfile"
+        );
     }
 
     #[test]
@@ -405,6 +467,9 @@ mod tests {
         let mut install = CommandStepBuilder::new("install");
         PackageManagerKind::Yarn1.install_deps(&app, &mut caches, &mut install, false);
 
-        assert!(!commands_debug_str(&install).contains("--frozen-lockfile"), "无锁文件时不应使用 --frozen-lockfile");
+        assert!(
+            !commands_debug_str(&install).contains("--frozen-lockfile"),
+            "无锁文件时不应使用 --frozen-lockfile"
+        );
     }
 }

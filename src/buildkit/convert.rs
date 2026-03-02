@@ -2,10 +2,8 @@ use super::build_llb::cache_store::BuildKitCacheStore;
 use super::build_llb::BuildGraph;
 use super::image::{build_image_config, ImageConfig};
 use super::platform::Platform;
-use crate::plan::BuildPlan;
-
-#[cfg(feature = "llb")]
 use crate::buildkit::proto::pb;
+use crate::plan::BuildPlan;
 
 /// 转换选项
 ///
@@ -51,7 +49,6 @@ pub fn convert_plan_to_dockerfile(
 }
 
 /// LLB 转换结果
-#[cfg(feature = "llb")]
 #[derive(Debug)]
 pub struct LlbConvertResult {
     pub definition: pb::Definition,
@@ -61,7 +58,6 @@ pub struct LlbConvertResult {
 /// 将 BuildPlan 转换为 LLB Definition + ImageConfig
 ///
 /// 对齐 railpack `ConvertPlanToLLB()`（Phase B 版本）
-#[cfg(feature = "llb")]
 pub fn convert_plan_to_llb(
     plan: &BuildPlan,
     opts: &ConvertPlanOptions,
@@ -107,9 +103,7 @@ mod tests {
 
         // install 步骤
         let mut install = Step::new("install");
-        install
-            .inputs
-            .push(Layer::new_step_layer("packages", None));
+        install.inputs.push(Layer::new_step_layer("packages", None));
         install.commands.push(Command::new_exec("npm install"));
         plan.add_step(install);
 
@@ -156,10 +150,7 @@ mod tests {
         let result = convert_plan_to_dockerfile(&plan, &opts).unwrap();
 
         // Dockerfile 不为空
-        assert!(
-            !result.dockerfile.is_empty(),
-            "生成的 Dockerfile 不应为空"
-        );
+        assert!(!result.dockerfile.is_empty(), "生成的 Dockerfile 不应为空");
         // 包含 FROM 指令
         assert!(
             result.dockerfile.contains("FROM"),
@@ -185,7 +176,9 @@ mod tests {
 
         let result = convert_plan_to_dockerfile(&plan, &opts).unwrap();
         assert!(
-            result.dockerfile.starts_with("# syntax=docker/dockerfile:1"),
+            result
+                .dockerfile
+                .starts_with("# syntax=docker/dockerfile:1"),
             "Dockerfile 应以 syntax header 开头"
         );
     }
@@ -210,7 +203,6 @@ mod tests {
 
     // === LLB 转换测试 ===
 
-    #[cfg(feature = "llb")]
     mod llb_tests {
         use super::*;
 
@@ -229,10 +221,7 @@ mod tests {
             // ImageConfig 有效
             assert_eq!(result.image_config.working_dir, "/app");
             assert_eq!(result.image_config.cmd, vec!["node server.js"]);
-            assert_eq!(
-                result.image_config.entrypoint,
-                vec!["/bin/bash", "-c"],
-            );
+            assert_eq!(result.image_config.entrypoint, vec!["/bin/bash", "-c"],);
         }
 
         #[test]
@@ -247,23 +236,19 @@ mod tests {
 
             // ImageConfig 应一致
             assert_eq!(
-                dockerfile_result.image_config.working_dir,
-                llb_result.image_config.working_dir,
+                dockerfile_result.image_config.working_dir, llb_result.image_config.working_dir,
                 "working_dir 应与 Phase A 一致"
             );
             assert_eq!(
-                dockerfile_result.image_config.entrypoint,
-                llb_result.image_config.entrypoint,
+                dockerfile_result.image_config.entrypoint, llb_result.image_config.entrypoint,
                 "entrypoint 应与 Phase A 一致"
             );
             assert_eq!(
-                dockerfile_result.image_config.cmd,
-                llb_result.image_config.cmd,
+                dockerfile_result.image_config.cmd, llb_result.image_config.cmd,
                 "cmd 应与 Phase A 一致"
             );
             assert_eq!(
-                dockerfile_result.image_config.env,
-                llb_result.image_config.env,
+                dockerfile_result.image_config.env, llb_result.image_config.env,
                 "env 应与 Phase A 一致"
             );
         }

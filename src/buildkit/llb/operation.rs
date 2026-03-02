@@ -48,7 +48,11 @@ pub fn digest_of(bytes: &[u8]) -> String {
 }
 
 /// 序列化 pb::Op 并计算 digest
-pub fn serialize_op(op: &pb::Op, metadata: OpMetadata, inputs: Vec<OperationOutput>) -> SerializedOp {
+pub fn serialize_op(
+    op: &pb::Op,
+    metadata: OpMetadata,
+    inputs: Vec<OperationOutput>,
+) -> SerializedOp {
     let bytes = op.encode_to_vec();
     let digest = digest_of(&bytes);
     SerializedOp {
@@ -99,8 +103,10 @@ mod tests {
     fn test_serialize_op_empty_op() {
         let op = pb::Op::default();
         let serialized = serialize_op(&op, OpMetadata::default(), vec![]);
-        assert!(!serialized.bytes.is_empty() || serialized.bytes.is_empty(),
-            "空 Op 序列化不应 panic");
+        assert!(
+            !serialized.bytes.is_empty() || serialized.bytes.is_empty(),
+            "空 Op 序列化不应 panic"
+        );
         assert!(serialized.digest.starts_with("sha256:"));
     }
 

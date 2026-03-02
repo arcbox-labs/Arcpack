@@ -117,11 +117,7 @@ impl Mise {
         }
 
         let output = cmd.output().map_err(|e| {
-            anyhow::anyhow!(
-                "failed to run mise command '{}': {}",
-                args.join(" "),
-                e
-            )
+            anyhow::anyhow!("failed to run mise command '{}': {}", args.join(" "), e)
         })?;
 
         if !output.status.success() {
@@ -150,9 +146,7 @@ impl VersionResolver for Mise {
 
         let latest = output.trim().to_string();
         if latest.is_empty() {
-            return Err(
-                anyhow::anyhow!("failed to resolve version {} of {}", version, pkg).into(),
-            );
+            return Err(anyhow::anyhow!("failed to resolve version {} of {}", version, pkg).into());
         }
 
         Ok(latest)
@@ -172,9 +166,7 @@ impl VersionResolver for Mise {
             .collect();
 
         if versions.is_empty() {
-            return Err(
-                anyhow::anyhow!("failed to resolve version {} of {}", version, pkg).into(),
-            );
+            return Err(anyhow::anyhow!("failed to resolve version {} of {}", version, pkg).into());
         }
 
         Ok(versions)

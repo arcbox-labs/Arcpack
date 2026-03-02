@@ -1,0 +1,111 @@
+---
+source: tests/snapshot_tests.rs
+expression: plan
+---
+{
+  "steps": [
+    {
+      "name": "packages:apt:build",
+      "inputs": [
+        {
+          "image": "ghcr.io/railwayapp/railpack-builder:latest"
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "sh -c 'apt-get update && apt-get install -y g++ gcc make'",
+          "customName": "install apt packages: g++ gcc make"
+        }
+      ],
+      "caches": [
+        "apt",
+        "apt-lists"
+      ]
+    },
+    {
+      "name": "packages:mise",
+      "inputs": [
+        {
+          "step": "packages:apt:build"
+        }
+      ],
+      "commands": [
+        {
+          "path": "/mise/shims"
+        },
+        {
+          "path": "/etc/mise/config.toml",
+          "name": "mise.toml",
+          "customName": "create mise config"
+        },
+        {
+          "cmd": "mise install",
+          "customName": "install mise packages: cmake, ninja"
+        }
+      ],
+      "assets": {
+        "mise.toml": "[tools.cmake]\nversion = \"latest.0.0\"\n\n[tools.ninja]\nversion = \"latest.0.0\"\n"
+      },
+      "variables": {
+        "MISE_CACHE_DIR": "/mise/cache",
+        "MISE_CONFIG_DIR": "/mise",
+        "MISE_DATA_DIR": "/mise",
+        "MISE_IDIOMATIC_VERSION_FILE_ENABLE_TOOLS": "python,node,ruby,elixir,go,java,yarn",
+        "MISE_INSTALLS_DIR": "/mise/installs",
+        "MISE_NODE_VERIFY": "false",
+        "MISE_PARANOID": "1",
+        "MISE_SHIMS_DIR": "/mise/shims",
+        "MISE_TRUSTED_CONFIG_PATHS": "/app"
+      }
+    },
+    {
+      "name": "build",
+      "inputs": [
+        {
+          "step": "packages:mise"
+        },
+        {
+          "include": [
+            "."
+          ],
+          "local": true
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "cmake -B /build -GNinja /app"
+        },
+        {
+          "cmd": "cmake --build /build"
+        }
+      ],
+      "secrets": [
+        "*"
+      ]
+    }
+  ],
+  "caches": {
+    "apt": {
+      "directory": "/var/cache/apt",
+      "type": "locked"
+    },
+    "apt-lists": {
+      "directory": "/var/lib/apt/lists",
+      "type": "locked"
+    }
+  },
+  "deploy": {
+    "base": {
+      "image": "ghcr.io/railwayapp/railpack-runtime:latest"
+    },
+    "inputs": [
+      {
+        "include": [
+          "/build"
+        ],
+        "step": "build"
+      }
+    ],
+    "startCommand": "/build/cpp-cmake"
+  }
+}

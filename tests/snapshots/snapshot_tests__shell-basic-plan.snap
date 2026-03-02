@@ -1,0 +1,52 @@
+---
+source: tests/snapshot_tests.rs
+expression: plan
+---
+{
+  "steps": [
+    {
+      "name": "packages:mise",
+      "inputs": [
+        {
+          "image": "ghcr.io/railwayapp/railpack-builder:latest"
+        }
+      ]
+    },
+    {
+      "name": "build",
+      "inputs": [
+        {
+          "step": "packages:mise"
+        },
+        {
+          "include": [
+            "."
+          ],
+          "local": true
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "chmod +x start.sh"
+        }
+      ],
+      "secrets": [
+        "*"
+      ]
+    }
+  ],
+  "deploy": {
+    "base": {
+      "image": "ghcr.io/railwayapp/railpack-runtime:latest"
+    },
+    "inputs": [
+      {
+        "include": [
+          "."
+        ],
+        "step": "build"
+      }
+    ],
+    "startCommand": "bash start.sh"
+  }
+}

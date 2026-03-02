@@ -2,7 +2,6 @@
 ///
 /// 对齐 railpack `core/providers/node/spa.go`
 /// SPA 框架使用 Caddy 作为静态文件服务器，包括 Caddyfile 模板和健康检查端点。
-
 use crate::generate::install_bin_builder::InstallBinBuilder;
 use crate::generate::GenerateContext;
 use crate::plan::{Command, Filter, Layer};
@@ -49,7 +48,8 @@ pub fn deploy_as_spa(
 ) -> Result<()> {
     // 1. 安装 Caddy 二进制
     let mut caddy_builder = InstallBinBuilder::new(CADDY_STEP_NAME);
-    let caddy_ref = caddy_builder.default_package(&mut ctx.resolver, "caddy", DEFAULT_CADDY_VERSION);
+    let caddy_ref =
+        caddy_builder.default_package(&mut ctx.resolver, "caddy", DEFAULT_CADDY_VERSION);
     let _ = caddy_ref;
 
     let caddy_layer = caddy_builder.get_layer();
@@ -57,8 +57,8 @@ pub fn deploy_as_spa(
     ctx.steps.push(Box::new(caddy_builder));
 
     // 2. 检查用户自定义 Caddyfile（在借用 ctx.steps 之前）
-    let has_custom_caddyfile = ctx.app.has_file("Caddyfile")
-        || ctx.app.has_file("Caddyfile.template");
+    let has_custom_caddyfile =
+        ctx.app.has_file("Caddyfile") || ctx.app.has_file("Caddyfile.template");
     let local_layer = if has_custom_caddyfile {
         Some(ctx.new_local_layer())
     } else {
@@ -72,21 +72,17 @@ pub fn deploy_as_spa(
         caddy_step.add_input(layer);
     } else {
         let caddyfile_content = CADDYFILE_TEMPLATE.replace("{DIST_DIR}", output_dir);
-        caddy_step.add_command(Command::new_file(
-            "/app/Caddyfile",
-            &caddyfile_content,
-        ));
+        caddy_step.add_command(Command::new_file("/app/Caddyfile", &caddyfile_content));
     }
 
     // 3. 配置 Deploy
-    ctx.deploy.start_cmd = Some("caddy run --config /app/Caddyfile --adapter caddyfile".to_string());
+    ctx.deploy.start_cmd =
+        Some("caddy run --config /app/Caddyfile --adapter caddyfile".to_string());
 
     // deploy inputs: caddy 二进制 + 构建输出 + Caddyfile
     let build_output_layer = Layer::new_step_layer(
         build_step_name,
-        Some(Filter::include_only(vec![
-            output_dir.to_string(),
-        ])),
+        Some(Filter::include_only(vec![output_dir.to_string()])),
     );
 
     ctx.deploy.add_inputs(&[caddy_layer, build_output_layer]);

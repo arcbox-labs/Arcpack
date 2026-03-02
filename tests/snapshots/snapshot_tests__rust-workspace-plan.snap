@@ -1,0 +1,132 @@
+---
+source: tests/snapshot_tests.rs
+expression: plan
+---
+{
+  "steps": [
+    {
+      "name": "packages:mise",
+      "inputs": [
+        {
+          "image": "ghcr.io/railwayapp/railpack-builder:latest"
+        }
+      ],
+      "commands": [
+        {
+          "path": "/mise/shims"
+        },
+        {
+          "path": "/etc/mise/config.toml",
+          "name": "mise.toml",
+          "customName": "create mise config"
+        },
+        {
+          "cmd": "mise install",
+          "customName": "install mise packages: rust"
+        }
+      ],
+      "assets": {
+        "mise.toml": "[tools.rust]\nversion = \"1.89.0.0\"\n"
+      },
+      "variables": {
+        "MISE_CACHE_DIR": "/mise/cache",
+        "MISE_CONFIG_DIR": "/mise",
+        "MISE_DATA_DIR": "/mise",
+        "MISE_IDIOMATIC_VERSION_FILE_ENABLE_TOOLS": "python,node,ruby,elixir,go,java,yarn",
+        "MISE_INSTALLS_DIR": "/mise/installs",
+        "MISE_NODE_VERIFY": "false",
+        "MISE_PARANOID": "1",
+        "MISE_SHIMS_DIR": "/mise/shims",
+        "MISE_TRUSTED_CONFIG_PATHS": "/app"
+      }
+    },
+    {
+      "name": "install",
+      "inputs": [
+        {
+          "step": "packages:mise"
+        }
+      ],
+      "commands": [
+        {
+          "src": "Cargo.toml",
+          "dest": "Cargo.toml"
+        }
+      ],
+      "secrets": [
+        "*"
+      ]
+    },
+    {
+      "name": "build",
+      "inputs": [
+        {
+          "exclude": [
+            "/app/src",
+            "/app/benches",
+            "/app/examples"
+          ],
+          "include": [
+            "."
+          ],
+          "step": "install"
+        },
+        {
+          "include": [
+            "."
+          ],
+          "local": true
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "cargo build --release"
+        },
+        {
+          "cmd": "mkdir -p bin"
+        }
+      ],
+      "secrets": [
+        "*"
+      ],
+      "caches": [
+        "cargo_registry",
+        "cargo_git",
+        "cargo_target"
+      ]
+    }
+  ],
+  "caches": {
+    "cargo_git": {
+      "directory": "/root/.cargo/git",
+      "type": "shared"
+    },
+    "cargo_registry": {
+      "directory": "/root/.cargo/registry",
+      "type": "shared"
+    },
+    "cargo_target": {
+      "directory": "target",
+      "type": "locked"
+    }
+  },
+  "deploy": {
+    "base": {
+      "image": "ghcr.io/railwayapp/railpack-runtime:latest"
+    },
+    "inputs": [
+      {
+        "exclude": [
+          "target"
+        ],
+        "include": [
+          "."
+        ],
+        "step": "build"
+      }
+    ],
+    "variables": {
+      "ROCKET_ADDRESS": "0.0.0.0"
+    }
+  }
+}

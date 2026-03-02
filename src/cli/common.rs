@@ -1,7 +1,6 @@
 /// 公共 CLI 参数和辅助函数
 ///
 /// 对齐 railpack `cli/common.go`
-
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -36,8 +35,12 @@ pub struct CommonBuildArgs {
     #[arg(long = "config-file")]
     pub config_file: Option<String>,
 
-    /// 禁用启动命令缺失检查（默认启用检查）
-    #[arg(long = "no-error-missing-start")]
+    /// 启动命令缺失时报错（默认关闭）
+    #[arg(long = "error-missing-start")]
+    pub error_missing_start: bool,
+
+    /// 兼容旧参数：不在缺少启动命令时报错（已弃用，隐藏）
+    #[arg(long = "no-error-missing-start", hide = true)]
     pub no_error_missing_start: bool,
 }
 
@@ -53,7 +56,15 @@ pub fn generate_build_result_for_command(args: &CommonBuildArgs) -> crate::Resul
         start_command: args.start_cmd.clone(),
         previous_versions,
         config_file_path: args.config_file.clone(),
-        error_missing_start_command: !args.no_error_missing_start,
+        // 新参数优先：--error-missing-start 显式开启校验
+        // 旧参数 --no-error-missing-start 仅保留兼容（默认行为本身即为 false）
+        error_missing_start_command: if args.error_missing_start {
+            true
+        } else if args.no_error_missing_start {
+            false
+        } else {
+            false
+        },
     };
 
     crate::generate_build_plan(&args.directory, env_vars, &options)
@@ -71,8 +82,7 @@ pub fn init_tracing(verbosity: u8) {
         _ => "trace",
     };
 
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(level));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)
@@ -156,11 +166,9 @@ fn parse_previous_versions(previous_args: &[String]) -> crate::Result<HashMap<St
         if let Some((pkg, version)) = arg.split_once('@') {
             map.insert(pkg.to_string(), version.to_string());
         } else {
-            return Err(anyhow::anyhow!(
-                "invalid --previous '{}', expected package@version",
-                arg
-            )
-            .into());
+            return Err(
+                anyhow::anyhow!("invalid --previous '{}', expected package@version", arg).into(),
+            );
         }
     }
     Ok(map)
@@ -246,12 +254,33 @@ mod tests {
 
     // error_missing_start 默认值测试
     #[test]
-    fn test_no_error_missing_start_defaults_to_false() {
+    fn test_error_missing_start_defaults_to_false() {
         use clap::Parser;
-        // 不传 --no-error-missing-start 时，默认 false → error_missing_start_command = true
+        // 不传参数时默认 false（对齐 railpack）
         let cli = crate::cli::Cli::parse_from(["arcpack", "plan", "."]);
         if let crate::cli::Commands::Plan(args) = cli.command {
+            assert!(!args.common.error_missing_start);
             assert!(!args.common.no_error_missing_start);
+        }
+    }
+
+    #[test]
+    fn test_error_missing_start_flag_sets_true() {
+        use clap::Parser;
+        let cli = crate::cli::Cli::parse_from(["arcpack", "plan", "--error-missing-start", "."]);
+        if let crate::cli::Commands::Plan(args) = cli.command {
+            assert!(args.common.error_missing_start);
+            assert!(!args.common.no_error_missing_start);
+        }
+    }
+
+    #[test]
+    fn test_legacy_no_error_missing_start_flag_is_accepted() {
+        use clap::Parser;
+        let cli = crate::cli::Cli::parse_from(["arcpack", "plan", "--no-error-missing-start", "."]);
+        if let crate::cli::Commands::Plan(args) = cli.command {
+            assert!(!args.common.error_missing_start);
+            assert!(args.common.no_error_missing_start);
         }
     }
 }

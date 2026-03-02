@@ -122,10 +122,7 @@ mod tests {
 
     #[test]
     fn test_from_envs_parses_key_value_pairs() {
-        let envs = vec![
-            "NODE_VERSION=18".to_string(),
-            "GO_VERSION=1.21".to_string(),
-        ];
+        let envs = vec!["NODE_VERSION=18".to_string(), "GO_VERSION=1.21".to_string()];
         let env = Environment::from_envs(envs);
         assert_eq!(env.get_variable("NODE_VERSION"), Some(&"18".to_string()));
         assert_eq!(env.get_variable("GO_VERSION"), Some(&"1.21".to_string()));

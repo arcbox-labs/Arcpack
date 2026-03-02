@@ -2,9 +2,57 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use anyhow::Result;
+use tracing::warn;
 
-use crate::buildkit::proto::control::{Exporter, SolveRequest};
+use crate::buildkit::proto::control::{self, Exporter, SolveRequest};
 use crate::buildkit::proto::pb;
+
+/// 缓存导入/导出配置（如 type=gha,url=...,token=...）
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CacheConfig {
+    /// 缓存类型（registry / local / gha / s3 等）
+    pub cache_type: String,
+    /// 附加属性（mode, url, token 等）
+    pub attrs: HashMap<String, String>,
+}
+
+impl CacheConfig {
+    /// 解析缓存配置字符串
+    ///
+    /// 格式：`type=gha,url=...,token=...`（逗号分隔的 key=value）
+    /// `type` 键提取为 `cache_type`，其余进入 `attrs`。
+    /// 对齐 railpack `parseKeyValue()` in `buildkit/build.go`。
+    pub fn parse(s: &str) -> Self {
+        let mut cache_type = String::new();
+        let mut attrs = HashMap::new();
+
+        for part in s.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            if let Some((key, value)) = part.split_once('=') {
+                if key == "type" {
+                    cache_type = value.to_string();
+                } else {
+                    attrs.insert(key.to_string(), value.to_string());
+                }
+            } else {
+                warn!(entry = part, "忽略格式错误的缓存配置条目（缺少 '='）");
+            }
+        }
+
+        Self { cache_type, attrs }
+    }
+
+    /// 转换为 protobuf CacheOptionsEntry
+    fn to_entry(&self) -> control::CacheOptionsEntry {
+        control::CacheOptionsEntry {
+            r#type: self.cache_type.clone(),
+            attrs: self.attrs.clone(),
+        }
+    }
+}
 
 /// Solve RPC 配置
 pub struct SolveConfig {
@@ -16,6 +64,10 @@ pub struct SolveConfig {
     pub session_id: Option<String>,
     /// 前端属性（如 containerimage.config）
     pub frontend_attrs: HashMap<String, String>,
+    /// 缓存导入配置
+    pub cache_imports: Vec<CacheConfig>,
+    /// 缓存导出配置
+    pub cache_exports: Vec<CacheConfig>,
 }
 
 /// 输出策略：镜像 / 本地目录 / Docker tar
@@ -40,19 +92,13 @@ pub fn build_solve_request(config: &SolveConfig) -> Result<SolveRequest> {
         }
         ExportConfig::Local { dest } => {
             let mut attrs = HashMap::new();
-            attrs.insert(
-                "dest".to_string(),
-                dest.to_string_lossy().into_owned(),
-            );
+            attrs.insert("dest".to_string(), dest.to_string_lossy().into_owned());
             ("local".to_string(), attrs)
         }
         ExportConfig::DockerTar { name, dest } => {
             let mut attrs = HashMap::new();
             attrs.insert("name".to_string(), name.clone());
-            attrs.insert(
-                "dest".to_string(),
-                dest.to_string_lossy().into_owned(),
-            );
+            attrs.insert("dest".to_string(), dest.to_string_lossy().into_owned());
             ("docker".to_string(), attrs)
         }
     };
@@ -65,12 +111,32 @@ pub fn build_solve_request(config: &SolveConfig) -> Result<SolveRequest> {
 
     let session = config.session_id.clone().unwrap_or_default();
 
+    // 缓存配置
+    let cache = if config.cache_imports.is_empty() && config.cache_exports.is_empty() {
+        None
+    } else {
+        Some(control::CacheOptions {
+            imports: config
+                .cache_imports
+                .iter()
+                .map(CacheConfig::to_entry)
+                .collect(),
+            exports: config
+                .cache_exports
+                .iter()
+                .map(CacheConfig::to_entry)
+                .collect(),
+            ..Default::default()
+        })
+    };
+
     Ok(SolveRequest {
         r#ref: generate_solve_ref(),
         definition: Some(config.definition.clone()),
         session,
         frontend_attrs: config.frontend_attrs.clone(),
         exporters: vec![exporter],
+        cache,
         ..Default::default()
     })
 }
@@ -103,6 +169,8 @@ mod tests {
             },
             session_id: Some("sess-123".to_string()),
             frontend_attrs: HashMap::new(),
+            cache_imports: vec![],
+            cache_exports: vec![],
         };
 
         let req = build_solve_request(&config).unwrap();
@@ -123,6 +191,8 @@ mod tests {
             },
             session_id: None,
             frontend_attrs: HashMap::new(),
+            cache_imports: vec![],
+            cache_exports: vec![],
         };
 
         let req = build_solve_request(&config).unwrap();
@@ -138,6 +208,8 @@ mod tests {
             },
             session_id: None,
             frontend_attrs: HashMap::new(),
+            cache_imports: vec![],
+            cache_exports: vec![],
         };
 
         let req = build_solve_request(&config).unwrap();
@@ -156,6 +228,8 @@ mod tests {
             },
             session_id: Some("sess-456".to_string()),
             frontend_attrs: HashMap::new(),
+            cache_imports: vec![],
+            cache_exports: vec![],
         };
 
         let req = build_solve_request(&config).unwrap();
@@ -179,6 +253,8 @@ mod tests {
             },
             session_id: Some("my-session".to_string()),
             frontend_attrs: HashMap::new(),
+            cache_imports: vec![],
+            cache_exports: vec![],
         };
 
         let req = build_solve_request(&config).unwrap();
@@ -195,6 +271,8 @@ mod tests {
             },
             session_id: None,
             frontend_attrs: HashMap::new(),
+            cache_imports: vec![],
+            cache_exports: vec![],
         };
 
         let req = build_solve_request(&config).unwrap();
@@ -217,6 +295,8 @@ mod tests {
             },
             session_id: None,
             frontend_attrs: attrs,
+            cache_imports: vec![],
+            cache_exports: vec![],
         };
 
         let req = build_solve_request(&config).unwrap();
@@ -236,6 +316,8 @@ mod tests {
             },
             session_id: None,
             frontend_attrs: HashMap::new(),
+            cache_imports: vec![],
+            cache_exports: vec![],
         };
 
         let req = build_solve_request(&config).unwrap();
@@ -252,6 +334,8 @@ mod tests {
             },
             session_id: None,
             frontend_attrs: HashMap::new(),
+            cache_imports: vec![],
+            cache_exports: vec![],
         };
 
         let req = build_solve_request(&config).unwrap();
@@ -259,4 +343,76 @@ mod tests {
         assert!(req.r#ref.starts_with("arcpack-"));
     }
 
+    // === CacheConfig 解析测试 ===
+
+    #[test]
+    fn test_parse_cache_config_gha() {
+        let c = CacheConfig::parse("type=gha,url=https://example.com,token=abc123");
+        assert_eq!(c.cache_type, "gha");
+        assert_eq!(c.attrs.get("url").unwrap(), "https://example.com");
+        assert_eq!(c.attrs.get("token").unwrap(), "abc123");
+    }
+
+    #[test]
+    fn test_parse_cache_config_registry() {
+        let c = CacheConfig::parse("type=registry,ref=example.com/cache:latest");
+        assert_eq!(c.cache_type, "registry");
+        assert_eq!(c.attrs.get("ref").unwrap(), "example.com/cache:latest");
+    }
+
+    #[test]
+    fn test_parse_cache_config_local() {
+        let c = CacheConfig::parse("type=local,dest=/tmp/cache");
+        assert_eq!(c.cache_type, "local");
+        assert_eq!(c.attrs.get("dest").unwrap(), "/tmp/cache");
+    }
+
+    #[test]
+    fn test_parse_cache_config_empty() {
+        let c = CacheConfig::parse("");
+        assert!(c.cache_type.is_empty());
+        assert!(c.attrs.is_empty());
+    }
+
+    #[test]
+    fn test_build_solve_request_no_cache() {
+        let config = SolveConfig {
+            definition: empty_definition(),
+            exporter: ExportConfig::Image {
+                name: "test".to_string(),
+                push: false,
+            },
+            session_id: None,
+            frontend_attrs: HashMap::new(),
+            cache_imports: vec![],
+            cache_exports: vec![],
+        };
+
+        let req = build_solve_request(&config).unwrap();
+        assert!(req.cache.is_none());
+    }
+
+    #[test]
+    fn test_build_solve_request_with_cache() {
+        let config = SolveConfig {
+            definition: empty_definition(),
+            exporter: ExportConfig::Image {
+                name: "test".to_string(),
+                push: false,
+            },
+            session_id: None,
+            frontend_attrs: HashMap::new(),
+            cache_imports: vec![CacheConfig::parse("type=gha,url=https://ex.com")],
+            cache_exports: vec![CacheConfig::parse("type=gha,mode=max")],
+        };
+
+        let req = build_solve_request(&config).unwrap();
+        let cache = req.cache.unwrap();
+        assert_eq!(cache.imports.len(), 1);
+        assert_eq!(cache.imports[0].r#type, "gha");
+        assert_eq!(cache.imports[0].attrs.get("url").unwrap(), "https://ex.com");
+        assert_eq!(cache.exports.len(), 1);
+        assert_eq!(cache.exports[0].r#type, "gha");
+        assert_eq!(cache.exports[0].attrs.get("mode").unwrap(), "max");
+    }
 }

@@ -1,9 +1,10 @@
 /// info 命令 —— 输出构建元信息
 ///
 /// 对齐 railpack `cli/info.go`
-
-use super::common::{CommonBuildArgs, generate_build_result_for_command, write_json_file, write_text_file};
-use super::pretty_print::{PrintOptions, OutputStream, format_build_result};
+use super::common::{
+    generate_build_result_for_command, write_json_file, write_text_file, CommonBuildArgs,
+};
+use super::pretty_print::{format_build_result, OutputStream, PrintOptions};
 
 /// 输出格式
 #[derive(Debug, Clone, clap::ValueEnum)]

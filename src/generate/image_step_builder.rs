@@ -48,7 +48,13 @@ impl ImageStepBuilder {
     }
 
     /// 更新包版本
-    pub fn version(&self, resolver: &mut Resolver, pkg_ref: &PackageRef, version: &str, source: &str) {
+    pub fn version(
+        &self,
+        resolver: &mut Resolver,
+        pkg_ref: &PackageRef,
+        version: &str,
+        source: &str,
+    ) {
         resolver.version(pkg_ref, version, source);
     }
 
@@ -76,9 +82,9 @@ impl StepBuilder for ImageStepBuilder {
         step.inputs = vec![Layer::new_image_layer(image, None)];
 
         if !self.apt_packages.is_empty() {
-            step.commands = vec![
-                BuildStepOptions::new_apt_install_command(&self.apt_packages),
-            ];
+            step.commands = vec![BuildStepOptions::new_apt_install_command(
+                &self.apt_packages,
+            )];
         }
 
         plan.add_step(step);
@@ -96,10 +102,10 @@ impl StepBuilder for ImageStepBuilder {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use super::*;
     use super::super::cache_context::CacheContext;
+    use super::*;
     use crate::resolver::{ResolvedPackage, VersionResolver};
+    use std::collections::HashMap;
 
     #[allow(dead_code)]
     struct MockResolver;
@@ -178,10 +184,8 @@ mod tests {
 
     #[test]
     fn test_image_step_builder_with_apt() {
-        let mut builder = ImageStepBuilder::new(
-            "packages:custom",
-            Box::new(|_| "ubuntu:22.04".to_string()),
-        );
+        let mut builder =
+            ImageStepBuilder::new("packages:custom", Box::new(|_| "ubuntu:22.04".to_string()));
         builder.apt_packages = vec!["curl".to_string()];
 
         let mut plan = BuildPlan::new();

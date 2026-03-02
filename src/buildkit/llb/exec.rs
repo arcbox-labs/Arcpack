@@ -36,10 +36,7 @@ pub enum MountSpec {
         sharing: CacheSharingMode,
     },
     /// Secret 环境变量挂载
-    SecretEnv {
-        name: String,
-        env_name: String,
-    },
+    SecretEnv { name: String, env_name: String },
     /// 只读层挂载
     ReadOnlyLayer {
         input: OperationOutput,
@@ -235,9 +232,12 @@ mod tests {
     #[test]
     fn test_exec_basic_args_and_cwd() {
         let base = image("node:20");
-        let output = ExecBuilder::new(base, vec!["/bin/sh".into(), "-c".into(), "npm install".into()])
-            .cwd("/app")
-            .root();
+        let output = ExecBuilder::new(
+            base,
+            vec!["/bin/sh".into(), "-c".into(), "npm install".into()],
+        )
+        .cwd("/app")
+        .root();
 
         let (_op, exec) = decode_exec_op(&output);
         let meta = exec.meta.unwrap();
@@ -307,7 +307,7 @@ mod tests {
         assert_eq!(ro_mount.dest, "/mnt/data");
         assert!(ro_mount.readonly);
         assert_eq!(ro_mount.input, 1); // 第二个输入
-        // Op.inputs 应有 2 个
+                                       // Op.inputs 应有 2 个
         assert_eq!(op.inputs.len(), 2);
         assert_eq!(op.inputs[1].digest, other.serialized_op.digest);
     }

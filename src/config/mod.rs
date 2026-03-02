@@ -101,19 +101,13 @@ impl Config {
     /// 从 CLI 选项生成配置
     ///
     /// 对齐 railpack `core/core.go GenerateConfigFromOptions`
-    pub fn from_options(
-        build_command: &Option<String>,
-        start_command: &Option<String>,
-    ) -> Self {
+    pub fn from_options(build_command: &Option<String>, start_command: &Option<String>) -> Self {
         let mut config = Self::empty();
 
         if let Some(cmd) = build_command.as_deref().filter(|c| !c.is_empty()) {
             let step_config = StepConfig {
                 step: Step {
-                    commands: vec![
-                        Command::new_copy(".", "."),
-                        Command::new_exec_shell(cmd),
-                    ],
+                    commands: vec![Command::new_copy(".", "."), Command::new_exec_shell(cmd)],
                     ..Step::new("build")
                 },
                 ..Default::default()
@@ -181,12 +175,13 @@ impl Config {
 
         // ARCPACK_INSTALL_CMD
         if let (Some(cmd), _) = env.get_config_variable("INSTALL_CMD") {
+            let mut install_cmd = Command::new_exec_shell(&cmd);
+            if let Command::Exec(exec) = &mut install_cmd {
+                exec.custom_name = Some(cmd.clone());
+            }
             let step_config = StepConfig {
                 step: Step {
-                    commands: vec![
-                        Command::new_copy(".", "."),
-                        Command::new_exec_shell(&cmd),
-                    ],
+                    commands: vec![Command::new_copy(".", "."), install_cmd],
                     ..Step::new("install")
                 },
                 ..Default::default()
@@ -196,12 +191,13 @@ impl Config {
 
         // ARCPACK_BUILD_CMD
         if let (Some(cmd), _) = env.get_config_variable("BUILD_CMD") {
+            let mut build_cmd = Command::new_exec_shell(&cmd);
+            if let Command::Exec(exec) = &mut build_cmd {
+                exec.custom_name = Some(cmd.clone());
+            }
             let step_config = StepConfig {
                 step: Step {
-                    commands: vec![
-                        Command::new_copy(".", "."),
-                        Command::new_exec_shell(&cmd),
-                    ],
+                    commands: vec![Command::new_copy(".", "."), build_cmd],
                     ..Step::new("build")
                 },
                 ..Default::default()
@@ -222,7 +218,9 @@ impl Config {
         if !packages.is_empty() {
             for pkg in packages {
                 if let Some((name, version)) = pkg.split_once('@') {
-                    config.packages.insert(name.to_string(), version.to_string());
+                    config
+                        .packages
+                        .insert(name.to_string(), version.to_string());
                 } else {
                     config.packages.insert(pkg, "*".to_string());
                 }
@@ -243,6 +241,12 @@ impl Config {
                 .get_or_insert_with(DeployConfig::default)
                 .apt_packages = deploy_apt;
         }
+
+        // 与 railpack 对齐：将传入环境变量名注入 secrets（排序保证稳定性）
+        let mut secrets: Vec<String> = env.variables.keys().cloned().collect();
+        secrets.sort();
+        secrets.dedup();
+        config.secrets = secrets;
 
         config
     }
@@ -431,6 +435,50 @@ mod tests {
     }
 
     #[test]
+    fn test_env_config_install_build_commands_have_custom_name() {
+        let dir = TempDir::new().unwrap();
+        let app = App::new(dir.path()).unwrap();
+
+        let mut env = Environment::default();
+        env.set_variable("ARCPACK_INSTALL_CMD", "echo install");
+        env.set_variable("ARCPACK_BUILD_CMD", "echo build");
+
+        let config = Config::load(&app, &env, Config::empty(), &None).unwrap();
+
+        let install_cmd = &config.steps["install"].step.commands[1];
+        match install_cmd {
+            Command::Exec(exec) => {
+                assert_eq!(exec.custom_name.as_deref(), Some("echo install"));
+            }
+            _ => panic!("expected install command to be exec"),
+        }
+
+        let build_cmd = &config.steps["build"].step.commands[1];
+        match build_cmd {
+            Command::Exec(exec) => {
+                assert_eq!(exec.custom_name.as_deref(), Some("echo build"));
+            }
+            _ => panic!("expected build command to be exec"),
+        }
+    }
+
+    #[test]
+    fn test_env_config_includes_env_keys_as_secrets_sorted() {
+        let dir = TempDir::new().unwrap();
+        let app = App::new(dir.path()).unwrap();
+
+        let mut env = Environment::default();
+        env.set_variable("B_SECRET", "2");
+        env.set_variable("A_SECRET", "1");
+
+        let config = Config::load(&app, &env, Config::empty(), &None).unwrap();
+        assert_eq!(
+            config.secrets,
+            vec!["A_SECRET".to_string(), "B_SECRET".to_string()]
+        );
+    }
+
+    #[test]
     fn test_get_or_create_step() {
         let mut config = Config::empty();
         {
@@ -473,15 +521,9 @@ mod tests {
         );
         // inputs 来自文件，未被覆盖
         assert_eq!(deploy.inputs.len(), 1);
-        assert_eq!(
-            deploy.inputs[0].step.as_deref(),
-            Some("build")
-        );
+        assert_eq!(deploy.inputs[0].step.as_deref(), Some("build"));
         // start_cmd 来自环境变量
-        assert_eq!(
-            deploy.start_cmd.as_deref(),
-            Some("node server.js")
-        );
+        assert_eq!(deploy.start_cmd.as_deref(), Some("node server.js"));
     }
 
     #[test]
@@ -505,10 +547,7 @@ mod tests {
 
     #[test]
     fn test_from_options_build_command() {
-        let config = Config::from_options(
-            &Some("make build".to_string()),
-            &None,
-        );
+        let config = Config::from_options(&Some("make build".to_string()), &None);
         assert!(config.steps.contains_key("build"));
         let build_step = &config.steps["build"];
         assert_eq!(build_step.step.commands.len(), 2);
@@ -516,10 +555,7 @@ mod tests {
 
     #[test]
     fn test_from_options_start_command() {
-        let config = Config::from_options(
-            &None,
-            &Some("node server.js".to_string()),
-        );
+        let config = Config::from_options(&None, &Some("node server.js".to_string()));
         assert_eq!(
             config.deploy.as_ref().unwrap().start_cmd,
             Some("node server.js".to_string())
@@ -528,10 +564,7 @@ mod tests {
 
     #[test]
     fn test_from_options_empty_strings_ignored() {
-        let config = Config::from_options(
-            &Some("".to_string()),
-            &Some("".to_string()),
-        );
+        let config = Config::from_options(&Some("".to_string()), &Some("".to_string()));
         assert!(config.steps.is_empty());
         assert!(config.deploy.is_none());
     }
@@ -539,11 +572,7 @@ mod tests {
     #[test]
     fn test_load_custom_config_file_path() {
         let dir = TempDir::new().unwrap();
-        std::fs::write(
-            dir.path().join("custom.json"),
-            r#"{ "provider": "node" }"#,
-        )
-        .unwrap();
+        std::fs::write(dir.path().join("custom.json"), r#"{ "provider": "node" }"#).unwrap();
 
         let app = App::new(dir.path()).unwrap();
         let env = Environment::default();
@@ -583,18 +612,11 @@ mod tests {
         // options 设置 start_command，file 设置 provider
         // 结果应包含两者（file > env > options）
         let dir = TempDir::new().unwrap();
-        std::fs::write(
-            dir.path().join("arcpack.json"),
-            r#"{ "provider": "node" }"#,
-        )
-        .unwrap();
+        std::fs::write(dir.path().join("arcpack.json"), r#"{ "provider": "node" }"#).unwrap();
 
         let app = App::new(dir.path()).unwrap();
         let env = Environment::default();
-        let options_config = Config::from_options(
-            &None,
-            &Some("node server.js".to_string()),
-        );
+        let options_config = Config::from_options(&None, &Some("node server.js".to_string()));
 
         let config = Config::load(&app, &env, options_config, &None).unwrap();
 
@@ -619,10 +641,7 @@ mod tests {
 
         let app = App::new(dir.path()).unwrap();
         let env = Environment::default();
-        let options_config = Config::from_options(
-            &None,
-            &Some("node server.js".to_string()),
-        );
+        let options_config = Config::from_options(&None, &Some("node server.js".to_string()));
 
         let config = Config::load(&app, &env, options_config, &None).unwrap();
 

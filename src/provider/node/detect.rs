@@ -60,8 +60,8 @@ pub fn detect_package_manager(app: &App, package_json: &PackageJson) -> PackageM
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     fn make_app(dir: &TempDir) -> App {
         App::new(dir.path().to_str().unwrap()).unwrap()
@@ -112,7 +112,10 @@ mod tests {
         fs::write(dir.path().join("yarn.lock"), "").unwrap();
         let app = make_app(&dir);
         let pkg = make_pkg_json(r#"{ "name": "test" }"#);
-        assert_eq!(detect_package_manager(&app, &pkg), PackageManagerKind::Yarn1);
+        assert_eq!(
+            detect_package_manager(&app, &pkg),
+            PackageManagerKind::Yarn1
+        );
     }
 
     #[test]
@@ -121,7 +124,10 @@ mod tests {
         fs::write(dir.path().join(".yarnrc.yml"), "nodeLinker: node-modules").unwrap();
         let app = make_app(&dir);
         let pkg = make_pkg_json(r#"{ "name": "test" }"#);
-        assert_eq!(detect_package_manager(&app, &pkg), PackageManagerKind::YarnBerry);
+        assert_eq!(
+            detect_package_manager(&app, &pkg),
+            PackageManagerKind::YarnBerry
+        );
     }
 
     #[test]
@@ -137,7 +143,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let app = make_app(&dir);
         let pkg = make_pkg_json(r#"{ "packageManager": "yarn@1.22.0" }"#);
-        assert_eq!(detect_package_manager(&app, &pkg), PackageManagerKind::Yarn1);
+        assert_eq!(
+            detect_package_manager(&app, &pkg),
+            PackageManagerKind::Yarn1
+        );
     }
 
     #[test]
@@ -145,7 +154,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let app = make_app(&dir);
         let pkg = make_pkg_json(r#"{ "packageManager": "yarn@4.0.0" }"#);
-        assert_eq!(detect_package_manager(&app, &pkg), PackageManagerKind::YarnBerry);
+        assert_eq!(
+            detect_package_manager(&app, &pkg),
+            PackageManagerKind::YarnBerry
+        );
     }
 
     #[test]

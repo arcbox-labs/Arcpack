@@ -36,9 +36,11 @@ impl App {
         };
 
         // 规范化路径
-        let source = source.canonicalize().map_err(|_| ArcpackError::SourceNotAccessible {
-            path: source.display().to_string(),
-        })?;
+        let source = source
+            .canonicalize()
+            .map_err(|_| ArcpackError::SourceNotAccessible {
+                path: source.display().to_string(),
+            })?;
 
         if !source.is_dir() {
             return Err(ArcpackError::SourceNotAccessible {
@@ -152,13 +154,11 @@ impl App {
 
         files
             .into_iter()
-            .filter(|file| {
-                match self.read_file(file) {
-                    Ok(content) => regex.is_match(&content),
-                    Err(e) => {
-                        tracing::warn!(file, error = %e, "find_files_with_content: 读取文件失败");
-                        false
-                    }
+            .filter(|file| match self.read_file(file) {
+                Ok(content) => regex.is_match(&content),
+                Err(e) => {
+                    tracing::warn!(file, error = %e, "find_files_with_content: 读取文件失败");
+                    false
                 }
             })
             .collect()
@@ -217,7 +217,10 @@ impl App {
         let matcher = glob.compile_matcher();
 
         let mut matches = Vec::new();
-        for entry in WalkDir::new(&self.source).into_iter().filter_map(|e| e.ok()) {
+        for entry in WalkDir::new(&self.source)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
             let path = entry.path();
             if let Ok(relative) = path.strip_prefix(&self.source) {
                 let relative_str = relative.to_string_lossy().to_string();
@@ -464,8 +467,7 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
-                .unwrap();
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 
         let app = App::new(dir.path()).unwrap();

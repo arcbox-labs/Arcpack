@@ -1,28 +1,27 @@
+pub mod cache;
 /// plan 模块 —— 构建计划纯数据结构
 ///
 /// 对齐 railpack `core/plan/` 包。
-
 pub mod command;
+pub mod dockerignore;
 pub mod filter;
 pub mod layer;
-pub mod cache;
+pub mod packages;
 pub mod spread;
 pub mod step;
-pub mod packages;
-pub mod dockerignore;
 
-use std::collections::{HashMap, HashSet, VecDeque};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 // re-export 核心类型
+pub use cache::{Cache, CacheType};
 pub use command::Command;
+pub use dockerignore::DockerignoreContext;
 pub use filter::Filter;
 pub use layer::Layer;
-pub use cache::{Cache, CacheType};
-pub use spread::{Spreadable, spread, spread_strings};
-pub use step::Step;
 pub use packages::PlanPackages;
-pub use dockerignore::DockerignoreContext;
+pub use spread::{spread, spread_strings, Spreadable};
+pub use step::Step;
 
 /// arcpack 默认构建镜像
 pub const ARCPACK_BUILDER_IMAGE: &str = "ghcr.io/railwayapp/railpack-builder:latest";
@@ -266,15 +265,14 @@ mod tests {
         plan.add_step(step);
 
         // deploy 引用 build 步骤
-        plan.deploy.inputs.push(Layer::new_step_layer("build", None));
+        plan.deploy
+            .inputs
+            .push(Layer::new_step_layer("build", None));
 
         plan.normalize();
 
         assert_eq!(plan.steps[0].inputs.len(), 1);
-        assert_eq!(
-            plan.steps[0].inputs[0].step,
-            Some("install".to_string())
-        );
+        assert_eq!(plan.steps[0].inputs[0].step, Some("install".to_string()));
     }
 
     #[test]
@@ -288,15 +286,13 @@ mod tests {
         let install = &mut plan.steps[1];
         install.inputs.push(Layer::new_step_layer("packages", None));
 
-        plan.deploy.inputs.push(Layer::new_step_layer("install", None));
+        plan.deploy
+            .inputs
+            .push(Layer::new_step_layer("install", None));
 
         plan.normalize();
 
-        let step_names: Vec<_> = plan
-            .steps
-            .iter()
-            .filter_map(|s| s.name.as_ref())
-            .collect();
+        let step_names: Vec<_> = plan.steps.iter().filter_map(|s| s.name.as_ref()).collect();
         assert!(step_names.contains(&&"packages".to_string()));
         assert!(step_names.contains(&&"install".to_string()));
         assert!(!step_names.contains(&&"orphan".to_string()));

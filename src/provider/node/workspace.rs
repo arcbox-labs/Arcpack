@@ -2,7 +2,6 @@
 ///
 /// 对齐 railpack `core/providers/node/workspace.go`
 /// 解析 package.json workspaces 和 pnpm-workspace.yaml
-
 use crate::app::App;
 use crate::Result;
 
@@ -109,8 +108,8 @@ pub fn workspace_cache_name(prefix: &str, pkg_path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     fn make_app(dir: &TempDir) -> App {
         App::new(dir.path().to_str().unwrap()).unwrap()
@@ -173,11 +172,7 @@ mod tests {
     #[test]
     fn test_resolve_workspace_packages_from_pnpm_workspace() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("package.json"),
-            r#"{"name": "root"}"#,
-        )
-        .unwrap();
+        fs::write(dir.path().join("package.json"), r#"{"name": "root"}"#).unwrap();
         fs::write(
             dir.path().join("pnpm-workspace.yaml"),
             "packages:\n  - 'packages/*'\n",
@@ -200,11 +195,7 @@ mod tests {
     #[test]
     fn test_resolve_workspace_packages_empty() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("package.json"),
-            r#"{"name": "test"}"#,
-        )
-        .unwrap();
+        fs::write(dir.path().join("package.json"), r#"{"name": "test"}"#).unwrap();
 
         let app = make_app(&dir);
         let packages = resolve_workspace_packages(&app).unwrap();

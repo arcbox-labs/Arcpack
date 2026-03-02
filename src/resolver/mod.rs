@@ -8,6 +8,17 @@ use version::resolve_to_fuzzy_version;
 /// 默认来源标识
 pub const DEFAULT_SOURCE: &str = "arcpack default";
 
+/// 环境开关：版本解析失败时回退到 fuzzy version（用于离线/受限环境）
+fn resolver_fallback_on_error_enabled() -> bool {
+    match std::env::var("ARCPACK_RESOLVER_FALLBACK_ON_ERROR") {
+        Ok(v) => {
+            let s = v.trim().to_ascii_lowercase();
+            matches!(s.as_str(), "1" | "true" | "yes" | "on")
+        }
+        Err(_) => false,
+    }
+}
+
 /// 包引用（用于链式 API）
 #[derive(Debug, Clone)]
 pub struct PackageRef {
@@ -80,8 +91,10 @@ impl Resolver {
     /// 注册一个包的默认版本，返回 PackageRef
     /// 如果存在 previous_version 则覆盖版本号
     pub fn default_package(&mut self, name: &str, default_version: &str) -> PackageRef {
-        self.packages
-            .insert(name.to_string(), RequestedPackage::new(name, default_version));
+        self.packages.insert(
+            name.to_string(),
+            RequestedPackage::new(name, default_version),
+        );
 
         // 如果存在历史版本且不同于默认版本，则使用历史版本
         if let Some(prev) = self.previous_versions.get(name) {
@@ -147,31 +160,45 @@ impl Resolver {
     /// 批量解析所有已注册包的版本
     pub fn resolve_packages(&self) -> Result<HashMap<String, ResolvedPackage>> {
         let mut resolved = HashMap::new();
+        let allow_fallback = resolver_fallback_on_error_enabled();
 
         for (name, pkg) in &self.packages {
             let fuzzy_version = resolve_to_fuzzy_version(&pkg.version);
 
             let latest_version = if let Some(ref is_available) = pkg.is_version_available {
                 // 有自定义校验：获取所有版本，从新到旧找第一个可用的
-                let versions = self.version_resolver.get_all_versions(name, &fuzzy_version)?;
-                let mut found = None;
-                for v in versions.iter().rev() {
-                    if is_available(v) {
-                        found = Some(v.clone());
-                        break;
+                match self.version_resolver.get_all_versions(name, &fuzzy_version) {
+                    Ok(versions) => {
+                        let mut found = None;
+                        for v in versions.iter().rev() {
+                            if is_available(v) {
+                                found = Some(v.clone());
+                                break;
+                            }
+                        }
+                        found.ok_or_else(|| {
+                            anyhow::anyhow!("no version available for {} {}", name, pkg.version)
+                        })?
+                    }
+                    Err(e) => {
+                        if pkg.skip_mise_install || allow_fallback {
+                            fuzzy_version.clone()
+                        } else {
+                            return Err(e);
+                        }
                     }
                 }
-                found.ok_or_else(|| {
-                    anyhow::anyhow!("no version available for {} {}", name, pkg.version)
-                })?
             } else {
                 // 直接获取最新版本
-                match self.version_resolver.get_latest_version(name, &fuzzy_version) {
+                match self
+                    .version_resolver
+                    .get_latest_version(name, &fuzzy_version)
+                {
                     Ok(v) => v,
                     Err(e) => {
-                        if pkg.skip_mise_install {
+                        if pkg.skip_mise_install || allow_fallback {
                             // 跳过 mise 安装时，解析失败不报错
-                            fuzzy_version
+                            fuzzy_version.clone()
                         } else {
                             return Err(e);
                         }
@@ -297,10 +324,7 @@ mod tests {
 
         let mut resolver = Resolver::new(Box::new(mock));
         let pkg_ref = resolver.default_package("node", "18");
-        resolver.set_version_available(
-            &pkg_ref,
-            Box::new(|v: &str| v.starts_with("18.")),
-        );
+        resolver.set_version_available(&pkg_ref, Box::new(|v: &str| v.starts_with("18.")));
 
         let resolved = resolver.resolve_packages().unwrap();
         let node = resolved.get("node").unwrap();
@@ -329,6 +353,30 @@ mod tests {
         let bun = resolved.get("bun").unwrap();
         // skip_mise_install 时解析失败回退到 fuzzy version
         assert_eq!(bun.resolved_version.as_deref(), Some("1.0"));
+    }
+
+    #[test]
+    fn test_resolver_env_fallback_on_error() {
+        // 模拟版本解析失败
+        struct FailResolver;
+        impl VersionResolver for FailResolver {
+            fn get_latest_version(&self, _pkg: &str, _version: &str) -> Result<String> {
+                Err(anyhow::anyhow!("resolve failed").into())
+            }
+            fn get_all_versions(&self, _pkg: &str, _version: &str) -> Result<Vec<String>> {
+                Err(anyhow::anyhow!("resolve failed").into())
+            }
+        }
+
+        std::env::set_var("ARCPACK_RESOLVER_FALLBACK_ON_ERROR", "1");
+
+        let mut resolver = Resolver::new(Box::new(FailResolver));
+        resolver.default_package("node", "22");
+        let resolved = resolver.resolve_packages().unwrap();
+        let node = resolved.get("node").unwrap();
+        assert_eq!(node.resolved_version.as_deref(), Some("22"));
+
+        std::env::remove_var("ARCPACK_RESOLVER_FALLBACK_ON_ERROR");
     }
 
     #[test]

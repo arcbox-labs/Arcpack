@@ -1,0 +1,91 @@
+---
+source: tests/snapshot_tests.rs
+expression: plan
+---
+{
+  "steps": [
+    {
+      "name": "packages:mise",
+      "inputs": [
+        {
+          "image": "ghcr.io/railwayapp/railpack-builder:latest"
+        }
+      ]
+    },
+    {
+      "name": "packages:caddy",
+      "inputs": [
+        {
+          "image": "ghcr.io/railwayapp/railpack-builder:latest"
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "mise install-into caddy@2.0.0 /arcpack/caddy"
+        },
+        {
+          "path": "/arcpack/caddy"
+        },
+        {
+          "path": "/arcpack/caddy/bin"
+        }
+      ]
+    },
+    {
+      "name": "build",
+      "inputs": [
+        {
+          "step": "packages:mise"
+        },
+        {
+          "include": [
+            "/arcpack/caddy"
+          ],
+          "step": "packages:caddy"
+        },
+        {
+          "include": [
+            "."
+          ],
+          "local": true
+        }
+      ],
+      "commands": [
+        {
+          "path": "/app/Caddyfile",
+          "name": ":{$PORT:3000} {\n    root * /app/public\n    encode gzip zstd\n\n    handle /health {\n        respond \"OK\" 200\n    }\n\n    handle {\n        try_files {path} {path}.html {path}/index.html /index.html\n        file_server\n    }\n\n    header {\n        X-Content-Type-Options nosniff\n        X-Frame-Options DENY\n        X-XSS-Protection \"1; mode=block\"\n    }\n}\n"
+        },
+        {
+          "cmd": "caddy fmt --overwrite /app/Caddyfile"
+        }
+      ],
+      "secrets": [
+        "*"
+      ]
+    }
+  ],
+  "deploy": {
+    "base": {
+      "image": "ghcr.io/railwayapp/railpack-runtime:latest"
+    },
+    "inputs": [
+      {
+        "include": [
+          "/arcpack/caddy"
+        ],
+        "step": "packages:caddy"
+      },
+      {
+        "include": [
+          "."
+        ],
+        "step": "build"
+      }
+    ],
+    "startCommand": "caddy run --config /app/Caddyfile --adapter caddyfile 2>&1",
+    "paths": [
+      "/arcpack/caddy",
+      "/arcpack/caddy/bin"
+    ]
+  }
+}

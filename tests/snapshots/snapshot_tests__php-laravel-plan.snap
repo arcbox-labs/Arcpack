@@ -1,0 +1,155 @@
+---
+source: tests/snapshot_tests.rs
+expression: plan
+---
+{
+  "steps": [
+    {
+      "name": "packages:php",
+      "inputs": [
+        {
+          "image": "dunglas/frankenphp:php8.2-bookworm"
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "sh -c 'apt-get update && apt-get install -y ca-certificates git unzip zip'",
+          "customName": "install apt packages: ca-certificates git unzip zip"
+        }
+      ]
+    },
+    {
+      "name": "extensions",
+      "inputs": [
+        {
+          "step": "packages:php"
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "install-php-extensions ctype curl dom fileinfo filter hash mbstring openssl pcre pdo session tokenizer xml"
+        }
+      ],
+      "secrets": [
+        "*"
+      ]
+    },
+    {
+      "name": "prepare",
+      "inputs": [
+        {
+          "step": "extensions"
+        }
+      ],
+      "commands": [
+        {
+          "path": "/etc/caddy/Caddyfile",
+          "name": "{\n\tfrankenphp\n\torder php_server before file_server\n\tadmin off\n}\n\n:${PORT:-8080} {\n\troot * /app/public\n\tencode zlib gzip\n\n\tphp_server\n}\n"
+        },
+        {
+          "path": "/usr/local/etc/php/conf.d/99-arcpack.ini",
+          "name": "[PHP]\n; 生产环境 PHP 配置\ndisplay_errors = Off\nlog_errors = On\nerror_log = /dev/stderr\nmemory_limit = 256M\npost_max_size = 100M\nupload_max_filesize = 100M\nmax_execution_time = 60\nopcache.enable = 1\nopcache.memory_consumption = 256\nopcache.interned_strings_buffer = 16\nopcache.max_accelerated_files = 20000\nopcache.validate_timestamps = 0\n"
+        },
+        {
+          "path": "/start-container.sh",
+          "name": "#!/bin/sh\nset -e\n\n# Laravel 迁移（可通过 ARCPACK_SKIP_MIGRATIONS 禁用）\nif [ -f /app/artisan ] && [ \"${ARCPACK_SKIP_MIGRATIONS}\" != \"true\" ]; then\n    php artisan migrate --force 2>/dev/null || true\nfi\n\n# 启动 FrankenPHP\nexec php-server\n"
+        },
+        {
+          "cmd": "chmod +x /start-container.sh"
+        }
+      ],
+      "secrets": [
+        "*"
+      ]
+    },
+    {
+      "name": "install:composer",
+      "inputs": [
+        {
+          "step": "prepare"
+        },
+        {
+          "include": [
+            "."
+          ],
+          "local": true
+        },
+        {
+          "image": "composer:latest",
+          "include": [
+            "/usr/bin/composer"
+          ]
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "composer install --optimize-autoloader --no-scripts --no-interaction"
+        }
+      ],
+      "secrets": [
+        "*"
+      ],
+      "caches": [
+        "composer-cache"
+      ]
+    },
+    {
+      "name": "build",
+      "inputs": [
+        {
+          "step": "install:composer"
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "mkdir -p storage/framework/{sessions,views,cache,testing} storage/logs bootstrap/cache && chmod -R ug+rw storage"
+        },
+        {
+          "cmd": "php artisan config:cache"
+        },
+        {
+          "cmd": "php artisan event:cache"
+        },
+        {
+          "cmd": "php artisan route:cache"
+        },
+        {
+          "cmd": "php artisan view:cache"
+        }
+      ],
+      "secrets": [
+        "*"
+      ]
+    }
+  ],
+  "caches": {
+    "composer-cache": {
+      "directory": "/opt/cache/composer",
+      "type": "shared"
+    }
+  },
+  "deploy": {
+    "base": {
+      "image": "ghcr.io/railwayapp/railpack-runtime:latest"
+    },
+    "inputs": [
+      {
+        "include": [
+          "."
+        ],
+        "step": "build"
+      }
+    ],
+    "startCommand": "/start-container.sh",
+    "variables": {
+      "APP_DEBUG": "false",
+      "APP_ENV": "production",
+      "IS_LARAVEL": "true",
+      "LOG_CHANNEL": "stderr",
+      "LOG_LEVEL": "debug",
+      "OCTANE_SERVER": "frankenphp",
+      "PHP_INI_DIR": "/usr/local/etc/php",
+      "SERVER_NAME": ":${PORT:-8080}"
+    }
+  }
+}

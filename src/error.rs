@@ -49,6 +49,9 @@ pub enum ArcpackError {
     #[error("缓存未找到: {key}")]
     CacheNotFound { key: String },
 
+    #[error("构建计划无效: {message}")]
+    InvalidPlan { message: String },
+
     // 内部错误
     #[error("IO 错误: {0}")]
     Io(#[from] std::io::Error),
@@ -115,8 +118,18 @@ mod tests {
 
     #[test]
     fn test_unknown_provider_display() {
-        let err = ArcpackError::UnknownProvider { name: "xxx".to_string() };
+        let err = ArcpackError::UnknownProvider {
+            name: "xxx".to_string(),
+        };
         assert_eq!(err.to_string(), "未知的 Provider: xxx");
+    }
+
+    #[test]
+    fn test_invalid_plan_display() {
+        let err = ArcpackError::InvalidPlan {
+            message: "deploy.base is required".to_string(),
+        };
+        assert_eq!(err.to_string(), "构建计划无效: deploy.base is required");
     }
 
     #[test]

@@ -84,10 +84,8 @@ fn parse_vertex(v: &Vertex) -> Vec<ProgressEvent> {
 fn compute_duration(v: &Vertex) -> Duration {
     match (&v.started, &v.completed) {
         (Some(start), Some(end)) => {
-            let start_nanos =
-                start.seconds as u64 * 1_000_000_000 + start.nanos.max(0) as u64;
-            let end_nanos =
-                end.seconds as u64 * 1_000_000_000 + end.nanos.max(0) as u64;
+            let start_nanos = start.seconds as u64 * 1_000_000_000 + start.nanos.max(0) as u64;
+            let end_nanos = end.seconds as u64 * 1_000_000_000 + end.nanos.max(0) as u64;
             Duration::from_nanos(end_nanos.saturating_sub(start_nanos))
         }
         _ => Duration::ZERO,
@@ -365,10 +363,7 @@ mod tests {
             name: "RUN make build".to_string(),
             error: "exit code: 1".to_string(),
         };
-        assert_eq!(
-            render_plain(&event),
-            "[RUN make build] ERROR: exit code: 1"
-        );
+        assert_eq!(render_plain(&event), "[RUN make build] ERROR: exit code: 1");
     }
 
     #[test]
