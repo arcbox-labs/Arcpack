@@ -234,8 +234,12 @@ impl Provider for JavaProvider {
             ])),
         );
 
+        let build_output = match self.build_tool {
+            BuildTool::Maven => "target/.".to_string(),
+            BuildTool::Gradle => ".".to_string(),
+        };
         let build_layer =
-            Layer::new_step_layer("build", Some(Filter::include_only(vec![".".to_string()])));
+            Layer::new_step_layer("build", Some(Filter::include_only(vec![build_output])));
 
         ctx.deploy.add_inputs(&[runtime_mise_layer, build_layer]);
 

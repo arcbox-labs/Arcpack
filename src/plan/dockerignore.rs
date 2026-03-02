@@ -30,6 +30,10 @@ impl DockerignoreContext {
 
         let content = std::fs::read_to_string(&dockerignore_path)?;
         let (excludes, includes) = parse_dockerignore(&content);
+        let includes = includes
+            .into_iter()
+            .filter(|pattern| include_pattern_exists(source, pattern))
+            .collect();
 
         Ok(Self {
             excludes: dedup(excludes),
@@ -64,16 +68,31 @@ fn parse_dockerignore(content: &str) -> (Vec<String>, Vec<String>) {
 
         if let Some(pattern) = trimmed.strip_prefix('!') {
             // ! 否定模式 → include
-            let pattern = pattern.trim();
+            let pattern = trim_anchor_slashes(pattern.trim());
             if !pattern.is_empty() {
                 includes.push(pattern.to_string());
             }
         } else {
-            excludes.push(trimmed.to_string());
+            let pattern = trim_anchor_slashes(trimmed);
+            if !pattern.is_empty() {
+                excludes.push(pattern.to_string());
+            }
         }
     }
 
     (excludes, includes)
+}
+
+fn include_pattern_exists(source: &Path, pattern: &str) -> bool {
+    if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+        return true;
+    }
+    source.join(pattern).exists()
+}
+
+fn trim_anchor_slashes(pattern: &str) -> &str {
+    let pattern = pattern.strip_prefix('/').unwrap_or(pattern);
+    pattern.strip_suffix('/').unwrap_or(pattern)
 }
 
 /// 去重（保持顺序）
@@ -122,6 +141,8 @@ mod tests {
             "**/*.md\n!README.md\nnode_modules\n!important.log\n",
         )
         .unwrap();
+        std::fs::write(dir.path().join("README.md"), "ok").unwrap();
+        std::fs::write(dir.path().join("important.log"), "ok").unwrap();
 
         let ctx = DockerignoreContext::new(dir.path()).unwrap();
         assert_eq!(ctx.excludes, vec!["**/*.md", "node_modules"]);
@@ -162,9 +183,42 @@ mod tests {
             "**/*.test.js\n**/dist\n!dist/important.js\n",
         )
         .unwrap();
+        std::fs::create_dir_all(dir.path().join("dist")).unwrap();
+        std::fs::write(dir.path().join("dist/important.js"), "ok").unwrap();
 
         let ctx = DockerignoreContext::new(dir.path()).unwrap();
         assert_eq!(ctx.excludes, vec!["**/*.test.js", "**/dist"]);
         assert_eq!(ctx.includes, vec!["dist/important.js"]);
+    }
+
+    #[test]
+    fn test_dockerignore_strips_leading_slash() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join(".dockerignore"), "/.copier/\n!/keep/\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("keep")).unwrap();
+
+        let ctx = DockerignoreContext::new(dir.path()).unwrap();
+        assert_eq!(ctx.excludes, vec![".copier"]);
+        assert_eq!(ctx.includes, vec!["keep"]);
+    }
+
+    #[test]
+    fn test_trim_anchor_slashes_only_one_each_side() {
+        assert_eq!(trim_anchor_slashes("//nested//"), "/nested/");
+    }
+
+    #[test]
+    fn test_dockerignore_include_keeps_existing_paths_only() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join(".dockerignore"),
+            "negation_test/*\n!negation_test/exists.txt\n!negation_test/missing.txt\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.path().join("negation_test")).unwrap();
+        std::fs::write(dir.path().join("negation_test/exists.txt"), "ok").unwrap();
+
+        let ctx = DockerignoreContext::new(dir.path()).unwrap();
+        assert_eq!(ctx.includes, vec!["negation_test/exists.txt"]);
     }
 }

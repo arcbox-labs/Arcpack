@@ -67,16 +67,28 @@ pub fn setup_mise_packages(
             let _ = uv_ref;
         }
         PythonPackageManager::Poetry => {
+            let pipx_ref = mise.default_package(resolver, "pipx", "latest");
+            let _ = pipx_ref;
             let poetry_ref = mise.default_package(resolver, "pipx:poetry", "latest");
             let _ = poetry_ref;
+            mise.variables
+                .insert("MISE_PIPX_UVX".to_string(), "true".to_string());
         }
         PythonPackageManager::Pdm => {
+            let pipx_ref = mise.default_package(resolver, "pipx", "latest");
+            let _ = pipx_ref;
             let pdm_ref = mise.default_package(resolver, "pipx:pdm", "latest");
             let _ = pdm_ref;
+            mise.variables
+                .insert("MISE_PIPX_UVX".to_string(), "true".to_string());
         }
         PythonPackageManager::Pipenv => {
+            let pipx_ref = mise.default_package(resolver, "pipx", "latest");
+            let _ = pipx_ref;
             let pipenv_ref = mise.default_package(resolver, "pipx:pipenv", "latest");
             let _ = pipenv_ref;
+            mise.variables
+                .insert("MISE_PIPX_UVX".to_string(), "true".to_string());
         }
         PythonPackageManager::Pip => {
             // pip 随 Python 内置
@@ -93,7 +105,9 @@ pub fn add_install_commands(
 ) {
     match pm {
         PythonPackageManager::Pip => {
-            install.add_command(Command::new_exec("python -m venv /app/.venv"));
+            if !app.has_file("requirements.txt") {
+                return;
+            }
             install.add_command(Command::new_exec("pip install -r requirements.txt"));
             let cache_name = caches.add_cache("pip", "/opt/pip-cache");
             install.add_cache(&cache_name);

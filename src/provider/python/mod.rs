@@ -81,7 +81,7 @@ impl PythonProvider {
                             // 提取包名（去除版本限制符）
                             let name = l
                                 .trim()
-                                .split(&['=', '>', '<', '!', '~', '['][..])
+                                .split(&['=', '>', '<', '!', '~'][..])
                                 .next()
                                 .unwrap_or("")
                                 .trim()
@@ -152,7 +152,7 @@ impl PythonProvider {
                 // 提取引号中的包名
                 let trimmed = trimmed.trim_matches(|c: char| c == '"' || c == '\'' || c == ',');
                 let name = trimmed
-                    .split(&['=', '>', '<', '!', '~', ' ', '[', ';'][..])
+                    .split(&['=', '>', '<', '!', '~', ' ', ';'][..])
                     .next()
                     .unwrap_or("")
                     .trim()
@@ -204,11 +204,27 @@ impl PythonProvider {
 
     /// 检测 APT 构建依赖
     fn detect_build_apt_deps(dependencies: &[String]) -> Vec<String> {
+        fn dep_matches(dep: &str, pkg: &str) -> bool {
+            let dep = dep.to_lowercase();
+            match pkg {
+                "psycopg" => dep == "psycopg" || dep.starts_with("psycopg["),
+                "psycopg2" => dep == "psycopg2" || dep.starts_with("psycopg2["),
+                _ => dep == pkg,
+            }
+        }
+
+        let has_psycopg_binary = dependencies
+            .iter()
+            .any(|d| d == "psycopg2-binary" || d.starts_with("psycopg[binary"));
+        let has_psycopg2_binary = dependencies.iter().any(|d| d == "psycopg2-binary");
+
         let mut apt_deps = Vec::new();
         for (pkg, apt_pkg) in BUILD_APT_DEPS {
-            if dependencies.iter().any(|d| d == *pkg) {
-                // psycopg2-binary 不需要 libpq-dev
-                if *pkg == "psycopg2" && dependencies.iter().any(|d| d == "psycopg2-binary") {
+            if dependencies.iter().any(|d| dep_matches(d, pkg)) {
+                // psycopg 二进制轮子不需要 libpq-dev
+                if (*pkg == "psycopg" && has_psycopg_binary)
+                    || (*pkg == "psycopg2" && has_psycopg2_binary)
+                {
                     continue;
                 }
                 apt_deps.push(apt_pkg.to_string());
@@ -219,16 +235,86 @@ impl PythonProvider {
 
     /// 检测 APT 运行时依赖
     fn detect_runtime_apt_deps(dependencies: &[String]) -> Vec<String> {
+        fn dep_matches(dep: &str, pkg: &str) -> bool {
+            let dep = dep.to_lowercase();
+            match pkg {
+                "psycopg" => dep == "psycopg" || dep.starts_with("psycopg["),
+                "psycopg2" => dep == "psycopg2" || dep.starts_with("psycopg2["),
+                _ => dep == pkg,
+            }
+        }
+
+        let has_psycopg_binary = dependencies
+            .iter()
+            .any(|d| d == "psycopg2-binary" || d.starts_with("psycopg[binary"));
+        let has_psycopg2_binary = dependencies.iter().any(|d| d == "psycopg2-binary");
+
         let mut apt_deps = Vec::new();
         for (pkg, apt_pkg) in RUNTIME_APT_DEPS {
-            if dependencies.iter().any(|d| d == *pkg) {
-                if *pkg == "psycopg2" && dependencies.iter().any(|d| d == "psycopg2-binary") {
+            if dependencies.iter().any(|d| dep_matches(d, pkg)) {
+                if (*pkg == "psycopg" && has_psycopg_binary)
+                    || (*pkg == "psycopg2" && has_psycopg2_binary)
+                {
                     continue;
                 }
                 apt_deps.push(apt_pkg.to_string());
             }
         }
         apt_deps
+    }
+
+    fn install_env_vars(pm: &PythonPackageManager) -> HashMap<String, String> {
+        let mut vars = HashMap::from([
+            ("PIP_DISABLE_PIP_VERSION_CHECK".to_string(), "1".to_string()),
+            ("PIP_DEFAULT_TIMEOUT".to_string(), "100".to_string()),
+            ("PYTHONFAULTHANDLER".to_string(), "1".to_string()),
+            ("PYTHONUNBUFFERED".to_string(), "1".to_string()),
+            ("PYTHONHASHSEED".to_string(), "random".to_string()),
+            ("PYTHONDONTWRITEBYTECODE".to_string(), "1".to_string()),
+        ]);
+
+        match pm {
+            PythonPackageManager::Pip => {
+                vars.insert("VIRTUAL_ENV".to_string(), "/app/.venv".to_string());
+                vars.insert("PIP_CACHE_DIR".to_string(), "/opt/pip-cache".to_string());
+            }
+            PythonPackageManager::Uv => {
+                vars.insert("VIRTUAL_ENV".to_string(), "/app/.venv".to_string());
+                vars.insert("UV_CACHE_DIR".to_string(), "/opt/uv-cache".to_string());
+                vars.insert("UV_LINK_MODE".to_string(), "copy".to_string());
+                vars.insert("UV_PYTHON_DOWNLOADS".to_string(), "never".to_string());
+                vars.insert("UV_COMPILE_BYTECODE".to_string(), "1".to_string());
+            }
+            PythonPackageManager::Poetry => {
+                vars.insert("VIRTUAL_ENV".to_string(), "/app/.venv".to_string());
+                vars.insert(
+                    "POETRY_VIRTUALENVS_IN_PROJECT".to_string(),
+                    "true".to_string(),
+                );
+                vars.insert(
+                    "POETRY_VIRTUALENVS_PATH".to_string(),
+                    "/app/.venv".to_string(),
+                );
+            }
+            PythonPackageManager::Pdm => {
+                vars.insert("PDM_CHECK_UPDATE".to_string(), "false".to_string());
+            }
+            PythonPackageManager::Pipenv => {
+                vars.insert("PIPENV_CHECK_UPDATE".to_string(), "false".to_string());
+                vars.insert("PIPENV_IGNORE_VIRTUALENVS".to_string(), "1".to_string());
+                vars.insert("PIPENV_VENV_IN_PROJECT".to_string(), "1".to_string());
+            }
+        }
+
+        vars
+    }
+
+    fn is_uv_workspace(app: &App) -> bool {
+        let Ok(content) = app.read_file("pyproject.toml") else {
+            return false;
+        };
+
+        content.contains("[tool.uv.workspace]") || content.contains("workspace = true")
     }
 
     /// 确保 mise_step_builder 已初始化
@@ -326,39 +412,101 @@ impl Provider for PythonProvider {
         // === install 步骤 ===
         let install = ctx.new_command_step("install");
         install.add_input(Layer::new_step_layer(&mise_step_name, None));
-
         {
+            // 对齐 railpack：install 默认不继承 `*` secrets。
             let install = Self::get_command_step(&mut ctx.steps, "install");
-
-            // Venv 配置
-            install.add_variables(&HashMap::from([(
-                "VIRTUAL_ENV".to_string(),
-                "/app/.venv".to_string(),
-            )]));
-            install.add_paths(&["/app/.venv/bin".to_string()]);
-
-            // Secrets 前缀过滤
             install.secrets = vec![];
-            install.use_secrets_with_prefix(&ctx.env, "PYTHON");
-            install.use_secrets_with_prefix(&ctx.env, "PIP");
-            install.use_secrets_with_prefix(&ctx.env, "PIPX");
-            install.use_secrets_with_prefix(&ctx.env, "UV");
-            install.use_secrets_with_prefix(&ctx.env, "PDM");
-            install.use_secrets_with_prefix(&ctx.env, "POETRY");
+        }
 
-            // 复制安装文件
-            let files = package_manager::get_install_files(&self.package_manager);
-            for file in files {
-                install.add_command(Command::new_copy(file, file));
+        let install_enabled = match self.package_manager {
+            PythonPackageManager::Pip => ctx.app.has_file("requirements.txt"),
+            PythonPackageManager::Uv => ctx.app.has_file("pyproject.toml") && ctx.app.has_file("uv.lock"),
+            PythonPackageManager::Poetry => {
+                ctx.app.has_file("pyproject.toml") && ctx.app.has_file("poetry.lock")
+            }
+            PythonPackageManager::Pdm => ctx.app.has_file("pyproject.toml") && ctx.app.has_file("pdm.lock"),
+            PythonPackageManager::Pipenv => ctx.app.has_file("Pipfile"),
+        };
+
+        let uv_workspace = install_enabled
+            && self.package_manager == PythonPackageManager::Uv
+            && Self::is_uv_workspace(&ctx.app);
+
+        if install_enabled {
+            {
+                let install = Self::get_command_step(&mut ctx.steps, "install");
+                install.add_variables(&Self::install_env_vars(&self.package_manager));
+
+                // Secrets 前缀过滤
+                install.secrets = vec![];
+                install.use_secrets_with_prefix(&ctx.env, "PYTHON");
+                install.use_secrets_with_prefix(&ctx.env, "PIP");
+                install.use_secrets_with_prefix(&ctx.env, "PIPX");
+                install.use_secrets_with_prefix(&ctx.env, "UV");
+                install.use_secrets_with_prefix(&ctx.env, "PDM");
+                install.use_secrets_with_prefix(&ctx.env, "POETRY");
             }
 
-            // 安装命令
-            package_manager::add_install_commands(
-                &self.package_manager,
-                install,
-                &ctx.app,
-                &mut ctx.caches,
-            );
+            if uv_workspace {
+                let local_layer = ctx.new_local_layer();
+                let install = Self::get_command_step(&mut ctx.steps, "install");
+                install.add_input(local_layer);
+            }
+
+            {
+                let install = Self::get_command_step(&mut ctx.steps, "install");
+
+                match self.package_manager {
+                    PythonPackageManager::Pip => {
+                        install.add_command(Command::new_exec("python -m venv /app/.venv"));
+                        install.add_paths(&["/app/.venv/bin".to_string()]);
+                        let files = package_manager::get_install_files(&self.package_manager);
+                        for file in files {
+                            install.add_command(Command::new_copy(file, file));
+                        }
+                    }
+                    PythonPackageManager::Uv => {
+                        if !uv_workspace {
+                            let files = package_manager::get_install_files(&self.package_manager);
+                            for file in files {
+                                install.add_command(Command::new_copy(file, file));
+                            }
+                        }
+                        install.add_paths(&[
+                            "/root/.local/bin".to_string(),
+                            "/app/.venv/bin".to_string(),
+                        ]);
+                    }
+                    PythonPackageManager::Poetry | PythonPackageManager::Pdm => {
+                        let files = package_manager::get_install_files(&self.package_manager);
+                        for file in files {
+                            install.add_command(Command::new_copy(file, file));
+                        }
+                        install.add_paths(&[
+                            "/root/.local/bin".to_string(),
+                            "/app/.venv/bin".to_string(),
+                        ]);
+                    }
+                    PythonPackageManager::Pipenv => {
+                        install.add_paths(&[
+                            "/root/.local/bin".to_string(),
+                            "/app/.venv/bin".to_string(),
+                        ]);
+                        let files = package_manager::get_install_files(&self.package_manager);
+                        for file in files {
+                            install.add_command(Command::new_copy(file, file));
+                        }
+                    }
+                }
+
+                // 安装命令
+                package_manager::add_install_commands(
+                    &self.package_manager,
+                    install,
+                    &ctx.app,
+                    &mut ctx.caches,
+                );
+            }
         }
 
         // === build 步骤 ===
@@ -370,7 +518,7 @@ impl Provider for PythonProvider {
             build.add_input(local_layer);
 
             // uv 模式：在 build 步骤中运行额外同步
-            if self.package_manager == PythonPackageManager::Uv {
+            if install_enabled && self.package_manager == PythonPackageManager::Uv {
                 build.add_command(Command::new_exec("uv sync --locked --no-dev --no-editable"));
             }
         }
@@ -414,13 +562,16 @@ impl Provider for PythonProvider {
             }),
         );
 
-        let venv_layer = Layer::new_step_layer(
-            "build",
-            Some(Filter::include_only(vec!["/app/.venv".to_string()])),
-        );
+        let install_outputs = if install_enabled {
+            vec!["/app/.venv".to_string()]
+        } else {
+            vec![]
+        };
+        let install_layer =
+            Layer::new_step_layer("build", Some(Filter::include_only(install_outputs)));
 
         ctx.deploy
-            .add_inputs(&[mise_layer, venv_layer, build_layer]);
+            .add_inputs(&[mise_layer, install_layer, build_layer]);
 
         Ok(())
     }

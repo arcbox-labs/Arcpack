@@ -108,7 +108,7 @@ expression: plan
       ],
       "caches": [
         "node-modules",
-        "packages-web-next-cache"
+        "next-packages-web"
       ]
     },
     {
@@ -131,16 +131,24 @@ expression: plan
     }
   ],
   "caches": {
+    "apt": {
+      "directory": "/var/cache/apt",
+      "type": "locked"
+    },
+    "apt-lists": {
+      "directory": "/var/lib/apt/lists",
+      "type": "locked"
+    },
+    "next-packages-web": {
+      "directory": "/app/packages/web/.next/cache",
+      "type": "shared"
+    },
     "node-modules": {
       "directory": "/app/node_modules/.cache",
       "type": "shared"
     },
     "npm-install": {
       "directory": "/root/.npm",
-      "type": "shared"
-    },
-    "packages-web-next-cache": {
-      "directory": "/app/packages/web/.next/cache",
       "type": "shared"
     }
   },
@@ -177,7 +185,6 @@ expression: plan
         "step": "build"
       }
     ],
-    "startCommand": "npm start",
     "variables": {
       "CI": "true",
       "NODE_ENV": "production",

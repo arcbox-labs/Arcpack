@@ -5,28 +5,10 @@ expression: plan
 {
   "steps": [
     {
-      "name": "packages:apt:build",
-      "inputs": [
-        {
-          "image": "ghcr.io/railwayapp/railpack-builder:latest"
-        }
-      ],
-      "commands": [
-        {
-          "cmd": "sh -c 'apt-get update && apt-get install -y build-essential'",
-          "customName": "install apt packages: build-essential"
-        }
-      ],
-      "caches": [
-        "apt",
-        "apt-lists"
-      ]
-    },
-    {
       "name": "packages:mise",
       "inputs": [
         {
-          "step": "packages:apt:build"
+          "image": "ghcr.io/railwayapp/railpack-builder:latest"
         }
       ],
       "commands": [
@@ -80,39 +62,75 @@ expression: plan
           "dest": "mix.exs"
         },
         {
+          "src": "mix.lock",
+          "dest": "mix.lock"
+        },
+        {
           "cmd": "mix deps.get --only prod"
+        },
+        {
+          "src": "config/config.exs*",
+          "dest": "config/"
+        },
+        {
+          "src": "config/prod.exs*",
+          "dest": "config/"
         },
         {
           "cmd": "mix deps.compile"
         }
       ],
-      "secrets": [
-        "*"
-      ],
       "variables": {
+        "ELIXIR_ERL_OPTIONS": "+fnu",
+        "LANG": "en_US.UTF-8",
+        "LANGUAGE": "en_US:en",
+        "LC_ALL": "en_US.UTF-8",
+        "MIX_ARCHIVES": "/root/.mix/archives",
         "MIX_ENV": "prod",
         "MIX_HOME": "/root/.mix"
-      },
-      "caches": [
-        "mix-deps"
-      ]
+      }
     },
     {
       "name": "build",
       "inputs": [
         {
-          "step": "install"
+          "step": "packages:mise"
         },
         {
           "include": [
-            "."
+            "deps",
+            "_build",
+            "config",
+            "mix.exs",
+            "mix.lock",
+            "/root/.mix"
           ],
-          "local": true
+          "step": "install"
         }
       ],
       "commands": [
         {
+          "src": "priv*",
+          "dest": "."
+        },
+        {
+          "src": "lib*",
+          "dest": "."
+        },
+        {
+          "src": "assets*",
+          "dest": "."
+        },
+        {
+          "src": "config/runtime.exs*",
+          "dest": "config/"
+        },
+        {
           "cmd": "mix compile"
+        },
+        {
+          "src": "rel*",
+          "dest": "."
         },
         {
           "cmd": "mix release"
@@ -122,32 +140,16 @@ expression: plan
         "*"
       ],
       "variables": {
+        "ELIXIR_ERL_OPTIONS": "+fnu",
+        "LANG": "en_US.UTF-8",
+        "LANGUAGE": "en_US:en",
+        "LC_ALL": "en_US.UTF-8",
+        "MIX_ARCHIVES": "/root/.mix/archives",
         "MIX_ENV": "prod",
         "MIX_HOME": "/root/.mix"
-      },
-      "caches": [
-        "mix-build"
-      ]
+      }
     }
   ],
-  "caches": {
-    "apt": {
-      "directory": "/var/cache/apt",
-      "type": "locked"
-    },
-    "apt-lists": {
-      "directory": "/var/lib/apt/lists",
-      "type": "locked"
-    },
-    "mix-build": {
-      "directory": "/app/_build",
-      "type": "shared"
-    },
-    "mix-deps": {
-      "directory": "/app/deps",
-      "type": "shared"
-    }
-  },
   "deploy": {
     "base": {
       "image": "ghcr.io/railwayapp/railpack-runtime:latest"
@@ -155,17 +157,7 @@ expression: plan
     "inputs": [
       {
         "include": [
-          "/mise/shims",
-          "/mise/installs",
-          "/usr/local/bin/mise",
-          "/etc/mise/config.toml",
-          "/root/.local/state/mise"
-        ],
-        "step": "packages:mise"
-      },
-      {
-        "include": [
-          "."
+          "_build/prod/rel"
         ],
         "step": "build"
       }

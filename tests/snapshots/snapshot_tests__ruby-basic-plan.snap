@@ -13,8 +13,8 @@ expression: plan
       ],
       "commands": [
         {
-          "cmd": "sh -c 'apt-get update && apt-get install -y cargo libffi-dev libjemalloc-dev libyaml-dev procps rustc zlib1g-dev'",
-          "customName": "install apt packages: cargo libffi-dev libjemalloc-dev libyaml-dev procps rustc zlib1g-dev"
+          "cmd": "sh -c 'apt-get update && apt-get install -y cargo libjemalloc-dev libyaml-dev rustc'",
+          "customName": "install apt packages: cargo libjemalloc-dev libyaml-dev rustc"
         }
       ],
       "caches": [
@@ -67,7 +67,7 @@ expression: plan
       ],
       "commands": [
         {
-          "cmd": "gem install bundler:2.5.6"
+          "cmd": "gem install -N bundler:2.5.6"
         },
         {
           "src": "Gemfile",
@@ -78,15 +78,19 @@ expression: plan
           "dest": "Gemfile.lock"
         },
         {
-          "cmd": "bundle install --jobs=4 --retry=3 --without development test"
+          "cmd": "bundle install"
+        },
+        {
+          "path": "/usr/local/bundle"
         }
       ],
-      "secrets": [
-        "*"
-      ],
-      "caches": [
-        "bundle-cache"
-      ]
+      "variables": {
+        "BUNDLE_GEMFILE": "/app/Gemfile",
+        "GEM_HOME": "/usr/local/bundle",
+        "GEM_PATH": "/usr/local/bundle",
+        "LD_PRELOAD": "/usr/lib/x86_64-linux-gnu/libjemalloc.so",
+        "MALLOC_ARENA_MAX": "2"
+      }
     },
     {
       "name": "build",
@@ -101,9 +105,13 @@ expression: plan
           "local": true
         }
       ],
-      "secrets": [
-        "*"
-      ]
+      "variables": {
+        "BUNDLE_GEMFILE": "/app/Gemfile",
+        "GEM_HOME": "/usr/local/bundle",
+        "GEM_PATH": "/usr/local/bundle",
+        "LD_PRELOAD": "/usr/lib/x86_64-linux-gnu/libjemalloc.so",
+        "MALLOC_ARENA_MAX": "2"
+      }
     },
     {
       "name": "packages:apt:runtime",
@@ -114,8 +122,8 @@ expression: plan
       ],
       "commands": [
         {
-          "cmd": "sh -c 'apt-get update && apt-get install -y libjemalloc2 libyaml-0-2'",
-          "customName": "install apt packages: libjemalloc2 libyaml-0-2"
+          "cmd": "sh -c 'apt-get update && apt-get install -y libjemalloc-dev libyaml-dev'",
+          "customName": "install apt packages: libjemalloc-dev libyaml-dev"
         }
       ],
       "caches": [
@@ -132,10 +140,6 @@ expression: plan
     "apt-lists": {
       "directory": "/var/lib/apt/lists",
       "type": "locked"
-    },
-    "bundle-cache": {
-      "directory": "/usr/local/bundle/cache",
-      "type": "shared"
     }
   },
   "deploy": {
@@ -155,24 +159,24 @@ expression: plan
       },
       {
         "include": [
-          "."
+          "/usr/local/bundle"
+        ],
+        "step": "install"
+      },
+      {
+        "include": [
+          "/app"
         ],
         "step": "build"
       }
     ],
-    "startCommand": "bundle exec rackup -o 0.0.0.0 -p ${PORT:-3000}",
+    "startCommand": "bundle exec rackup config.ru -p ${PORT:-3000}",
     "variables": {
       "BUNDLE_GEMFILE": "/app/Gemfile",
       "GEM_HOME": "/usr/local/bundle",
       "GEM_PATH": "/usr/local/bundle",
-      "LD_PRELOAD": "libjemalloc.so.2",
-      "MALLOC_ARENA_MAX": "2",
-      "RAILS_ENV": "production",
-      "RAILS_LOG_TO_STDOUT": "enabled",
-      "RAILS_SERVE_STATIC_FILES": "true"
-    },
-    "paths": [
-      "/usr/local/bundle/bin"
-    ]
+      "LD_PRELOAD": "/usr/lib/x86_64-linux-gnu/libjemalloc.so",
+      "MALLOC_ARENA_MAX": "2"
+    }
   }
 }

@@ -73,8 +73,8 @@ pub fn setup_gradle_build(
     app: &App,
     caches: &mut crate::generate::cache_context::CacheContext,
 ) {
-    // chmod +x gradlew
-    if app.has_file("gradlew") {
+    // 与 railpack 对齐：仅在 gradlew 不可执行时添加 chmod。
+    if app.has_file("gradlew") && !app.is_file_executable("gradlew") {
         build.add_command(Command::new_exec("chmod +x gradlew"));
     }
 

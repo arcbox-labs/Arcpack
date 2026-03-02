@@ -22,11 +22,11 @@ expression: plan
         },
         {
           "cmd": "mise install",
-          "customName": "install mise packages: pipx:poetry, python"
+          "customName": "install mise packages: pipx, pipx:poetry, python"
         }
       ],
       "assets": {
-        "mise.toml": "[tools.\"pipx:poetry\"]\nversion = \"latest.0.0\"\n\n[tools.python]\nversion = \"3.13.0.0\"\n"
+        "mise.toml": "[tools.pipx]\nversion = \"latest.0.0\"\n\n[tools.\"pipx:poetry\"]\nversion = \"latest.0.0\"\n\n[tools.python]\nversion = \"3.13.0.0\"\n"
       },
       "variables": {
         "MISE_CACHE_DIR": "/mise/cache",
@@ -36,6 +36,7 @@ expression: plan
         "MISE_INSTALLS_DIR": "/mise/installs",
         "MISE_NODE_VERIFY": "false",
         "MISE_PARANOID": "1",
+        "MISE_PIPX_UVX": "true",
         "MISE_PYTHON_COMPILE": "false",
         "MISE_SHIMS_DIR": "/mise/shims",
         "MISE_TRUSTED_CONFIG_PATHS": "/app"
@@ -50,9 +51,6 @@ expression: plan
       ],
       "commands": [
         {
-          "path": "/app/.venv/bin"
-        },
-        {
           "src": "pyproject.toml",
           "dest": "pyproject.toml"
         },
@@ -61,10 +59,24 @@ expression: plan
           "dest": "poetry.lock"
         },
         {
+          "path": "/root/.local/bin"
+        },
+        {
+          "path": "/app/.venv/bin"
+        },
+        {
           "cmd": "poetry install --no-interaction --no-ansi --only main --no-root"
         }
       ],
       "variables": {
+        "PIP_DEFAULT_TIMEOUT": "100",
+        "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+        "POETRY_VIRTUALENVS_IN_PROJECT": "true",
+        "POETRY_VIRTUALENVS_PATH": "/app/.venv",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONFAULTHANDLER": "1",
+        "PYTHONHASHSEED": "random",
+        "PYTHONUNBUFFERED": "1",
         "VIRTUAL_ENV": "/app/.venv"
       }
     },
@@ -103,7 +115,7 @@ expression: plan
       },
       {
         "include": [
-          ".venv"
+          "/app/.venv"
         ],
         "step": "build"
       },

@@ -493,6 +493,20 @@ fn normalize_plan(value: Value) -> Value {
                     }
                 }
 
+                if k == "cmd" {
+                    if let Value::String(cmd) = v {
+                        out.insert(k, Value::String(normalize_command_string(&cmd)));
+                        continue;
+                    }
+                }
+
+                if k == "startCommand" {
+                    if let Value::String(cmd) = v {
+                        out.insert(k, Value::String(normalize_command_string(&cmd)));
+                        continue;
+                    }
+                }
+
                 out.insert(k, normalize_plan(v));
             }
             Value::Object(out.into_iter().collect())
@@ -510,6 +524,37 @@ fn normalize_secret_name(secret: &str) -> String {
         return format!("PACKCFG_{suffix}");
     }
     secret.to_string()
+}
+
+fn normalize_command_string(cmd: &str) -> String {
+    if let Some(rest) = cmd.strip_prefix("mise install-into ") {
+        let Some((pkg_with_ver, path)) = rest.split_once(' ') else {
+            return cmd.to_string();
+        };
+        let Some((pkg, _ver)) = pkg_with_ver.split_once('@') else {
+            return cmd.to_string();
+        };
+        return format!("mise install-into {}@<resolved> {}", pkg, path);
+    }
+
+    if cmd.starts_with("java ") {
+        let mut normalized = String::with_capacity(cmd.len());
+        let mut prev_space = false;
+        for ch in cmd.chars() {
+            if ch == ' ' {
+                if !prev_space {
+                    normalized.push(ch);
+                }
+                prev_space = true;
+            } else {
+                normalized.push(ch);
+                prev_space = false;
+            }
+        }
+        return normalized.trim().to_string();
+    }
+
+    cmd.to_string()
 }
 
 fn format_plan_diff(arcpack: &Value, railpack: &Value) -> String {
@@ -648,6 +693,25 @@ mod tests {
     }
 
     #[test]
+    fn test_normalize_command_string_mise_install_into() {
+        let raw = "mise install-into caddy@latest /railpack/caddy";
+        assert_eq!(
+            normalize_command_string(raw),
+            "mise install-into caddy@<resolved> /railpack/caddy"
+        );
+        assert_eq!(normalize_command_string("npm ci"), "npm ci");
+    }
+
+    #[test]
+    fn test_normalize_command_string_java_whitespace() {
+        let raw = "java $JAVA_OPTS -jar  $(ls -1 */build/libs/*jar | grep -v plain)";
+        assert_eq!(
+            normalize_command_string(raw),
+            "java $JAVA_OPTS -jar $(ls -1 */build/libs/*jar | grep -v plain)"
+        );
+    }
+
+    #[test]
     fn test_load_fixture_cases_parses_json5_array() {
         let tmp = tempfile::tempdir().unwrap();
         let fixture_dir = tmp.path();
@@ -695,16 +759,12 @@ mod tests {
         ];
 
         let mapped = adapt_envs_for_arcpack(&envs);
-        assert!(
-            mapped
-                .iter()
-                .any(|(k, v)| k == "RAILPACK_BUILD_CMD" && v == "echo build")
-        );
-        assert!(
-            mapped
-                .iter()
-                .any(|(k, v)| k == "ARCPACK_BUILD_CMD" && v == "echo build")
-        );
+        assert!(mapped
+            .iter()
+            .any(|(k, v)| k == "RAILPACK_BUILD_CMD" && v == "echo build"));
+        assert!(mapped
+            .iter()
+            .any(|(k, v)| k == "ARCPACK_BUILD_CMD" && v == "echo build"));
         assert!(mapped.iter().any(|(k, v)| k == "FOO" && v == "bar"));
     }
 

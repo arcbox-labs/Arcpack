@@ -50,6 +50,9 @@ expression: plan
       ],
       "commands": [
         {
+          "cmd": "python -m venv /app/.venv"
+        },
+        {
           "path": "/app/.venv/bin"
         },
         {
@@ -57,13 +60,17 @@ expression: plan
           "dest": "requirements.txt"
         },
         {
-          "cmd": "python -m venv /app/.venv"
-        },
-        {
           "cmd": "pip install -r requirements.txt"
         }
       ],
       "variables": {
+        "PIP_CACHE_DIR": "/opt/pip-cache",
+        "PIP_DEFAULT_TIMEOUT": "100",
+        "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONFAULTHANDLER": "1",
+        "PYTHONHASHSEED": "random",
+        "PYTHONUNBUFFERED": "1",
         "VIRTUAL_ENV": "/app/.venv"
       },
       "caches": [
@@ -111,7 +118,7 @@ expression: plan
       },
       {
         "include": [
-          ".venv"
+          "/app/.venv"
         ],
         "step": "build"
       },

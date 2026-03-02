@@ -117,6 +117,14 @@ expression: plan
     }
   ],
   "caches": {
+    "apt": {
+      "directory": "/var/cache/apt",
+      "type": "locked"
+    },
+    "apt-lists": {
+      "directory": "/var/lib/apt/lists",
+      "type": "locked"
+    },
     "bun-install": {
       "directory": "/root/.bun/install/cache",
       "type": "shared"

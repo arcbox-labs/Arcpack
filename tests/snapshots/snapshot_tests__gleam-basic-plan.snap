@@ -41,6 +41,28 @@ expression: plan
       }
     },
     {
+      "name": "build",
+      "inputs": [
+        {
+          "step": "packages:mise"
+        },
+        {
+          "include": [
+            "."
+          ],
+          "local": true
+        }
+      ],
+      "commands": [
+        {
+          "cmd": "gleam export erlang-shipment"
+        }
+      ],
+      "secrets": [
+        "*"
+      ]
+    },
+    {
       "name": "packages:mise:runtime",
       "inputs": [
         {
@@ -75,28 +97,6 @@ expression: plan
         "MISE_SHIMS_DIR": "/mise/shims",
         "MISE_TRUSTED_CONFIG_PATHS": "/app"
       }
-    },
-    {
-      "name": "build",
-      "inputs": [
-        {
-          "step": "packages:mise"
-        },
-        {
-          "include": [
-            "."
-          ],
-          "local": true
-        }
-      ],
-      "commands": [
-        {
-          "cmd": "gleam export erlang-shipment"
-        }
-      ],
-      "secrets": [
-        "*"
-      ]
     }
   ],
   "deploy": {
@@ -116,7 +116,7 @@ expression: plan
       },
       {
         "include": [
-          "build/erlang-shipment"
+          "build/erlang-shipment/."
         ],
         "step": "build"
       }

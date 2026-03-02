@@ -1,9 +1,8 @@
+use std::path::Path;
 /// Docker Compose 生命周期管理
 ///
 /// 用于需要额外服务（数据库、Redis 等）的集成测试。
-
 use std::process::Command;
-use std::path::Path;
 
 /// Docker Compose 管理器
 #[allow(dead_code)]
@@ -32,9 +31,12 @@ impl ComposeManager {
         let output = Command::new("docker")
             .args([
                 "compose",
-                "-f", &self.compose_file,
-                "-p", &self.project_name,
-                "up", "-d",
+                "-f",
+                &self.compose_file,
+                "-p",
+                &self.project_name,
+                "up",
+                "-d",
             ])
             .output()
             .map_err(|e| format!("failed to run docker compose up: {}", e))?;
@@ -52,9 +54,13 @@ impl ComposeManager {
         let _ = Command::new("docker")
             .args([
                 "compose",
-                "-f", &self.compose_file,
-                "-p", &self.project_name,
-                "down", "--volumes", "--remove-orphans",
+                "-f",
+                &self.compose_file,
+                "-p",
+                &self.project_name,
+                "down",
+                "--volumes",
+                "--remove-orphans",
             ])
             .output();
     }

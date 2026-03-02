@@ -2,7 +2,6 @@
 ///
 /// 每个端到端测试标记 #[ignore]，需要 buildkitd + docker 运行时环境。
 /// 非 ignore 测试仅验证辅助函数的结构正确性。
-
 use std::process::Command;
 
 /// 使用指定后端构建 fixture 项目，返回镜像名
@@ -103,21 +102,13 @@ fn get_sorted_env(image: &str) -> Vec<String> {
 fn assert_cmd_equal(image_a: &str, image_b: &str) {
     let cmd_a = get_image_cmd(image_a);
     let cmd_b = get_image_cmd(image_b);
-    assert_eq!(
-        cmd_a, cmd_b,
-        "CMD 在镜像 {image_a} 和 {image_b} 中不一致"
-    );
+    assert_eq!(cmd_a, cmd_b, "CMD 在镜像 {image_a} 和 {image_b} 中不一致");
 }
 
 /// 获取镜像的 CMD 配置
 fn get_image_cmd(image: &str) -> String {
     let output = Command::new("docker")
-        .args([
-            "inspect",
-            "--format",
-            "{{json .Config.Cmd}}",
-            image,
-        ])
+        .args(["inspect", "--format", "{{json .Config.Cmd}}", image])
         .output()
         .expect("failed to run docker inspect");
     assert!(
@@ -146,9 +137,7 @@ impl ImageCleanupGuard {
 impl Drop for ImageCleanupGuard {
     fn drop(&mut self) {
         for name in &self.names {
-            let result = Command::new("docker")
-                .args(["rmi", "-f", name])
-                .output();
+            let result = Command::new("docker").args(["rmi", "-f", name]).output();
             if let Ok(output) = result {
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);

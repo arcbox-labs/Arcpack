@@ -5,28 +5,10 @@ expression: plan
 {
   "steps": [
     {
-      "name": "packages:apt:build",
-      "inputs": [
-        {
-          "image": "ghcr.io/railwayapp/railpack-builder:latest"
-        }
-      ],
-      "commands": [
-        {
-          "cmd": "sh -c 'apt-get update && apt-get install -y g++ gcc make'",
-          "customName": "install apt packages: g++ gcc make"
-        }
-      ],
-      "caches": [
-        "apt",
-        "apt-lists"
-      ]
-    },
-    {
       "name": "packages:mise",
       "inputs": [
         {
-          "step": "packages:apt:build"
+          "image": "ghcr.io/railwayapp/railpack-builder:latest"
         }
       ],
       "commands": [
@@ -73,6 +55,9 @@ expression: plan
       ],
       "commands": [
         {
+          "cmd": "mkdir /build"
+        },
+        {
           "cmd": "cmake -B /build -GNinja /app"
         },
         {
@@ -84,16 +69,6 @@ expression: plan
       ]
     }
   ],
-  "caches": {
-    "apt": {
-      "directory": "/var/cache/apt",
-      "type": "locked"
-    },
-    "apt-lists": {
-      "directory": "/var/lib/apt/lists",
-      "type": "locked"
-    }
-  },
   "deploy": {
     "base": {
       "image": "ghcr.io/railwayapp/railpack-runtime:latest"
@@ -101,7 +76,7 @@ expression: plan
     "inputs": [
       {
         "include": [
-          "/build"
+          "/build/"
         ],
         "step": "build"
       }

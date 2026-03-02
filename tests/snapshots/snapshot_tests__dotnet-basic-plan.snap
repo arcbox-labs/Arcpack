@@ -49,8 +49,19 @@ expression: plan
       ],
       "commands": [
         {
-          "src": "MyApp.csproj",
-          "dest": "MyApp.csproj"
+          "src": "nuget.config*",
+          "dest": "nuget.config*"
+        },
+        {
+          "src": "*.csproj",
+          "dest": "*.csproj"
+        },
+        {
+          "src": "global.json*",
+          "dest": "global.json*"
+        },
+        {
+          "cmd": "mkdir -p /root/.nuget/packages"
         },
         {
           "cmd": "dotnet restore"
@@ -59,14 +70,24 @@ expression: plan
       "secrets": [
         "*"
       ],
-      "caches": [
-        "nuget-packages"
-      ]
+      "variables": {
+        "ASPNETCORE_CONTENTROOT": "/app/out",
+        "ASPNETCORE_ENVIRONMENT": "Production",
+        "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
+        "DOTNET_ROOT": "/mise/installs/dotnet/8.0"
+      }
     },
     {
       "name": "build",
       "inputs": [
         {
+          "step": "packages:mise"
+        },
+        {
+          "include": [
+            "obj/",
+            "/root/.nuget/packages"
+          ],
           "step": "install"
         },
         {
@@ -83,7 +104,13 @@ expression: plan
       ],
       "secrets": [
         "*"
-      ]
+      ],
+      "variables": {
+        "ASPNETCORE_CONTENTROOT": "/app/out",
+        "ASPNETCORE_ENVIRONMENT": "Production",
+        "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
+        "DOTNET_ROOT": "/mise/installs/dotnet/8.0"
+      }
     },
     {
       "name": "packages:apt:runtime",
@@ -105,9 +132,13 @@ expression: plan
     }
   ],
   "caches": {
-    "nuget-packages": {
-      "directory": "/root/.nuget/packages",
-      "type": "shared"
+    "apt": {
+      "directory": "/var/cache/apt",
+      "type": "locked"
+    },
+    "apt-lists": {
+      "directory": "/var/lib/apt/lists",
+      "type": "locked"
     }
   },
   "deploy": {
@@ -117,17 +148,13 @@ expression: plan
     "inputs": [
       {
         "include": [
-          "/mise/shims",
-          "/mise/installs",
-          "/usr/local/bin/mise",
-          "/etc/mise/config.toml",
-          "/root/.local/state/mise"
+          "/mise/installs/dotnet/8.0"
         ],
         "step": "packages:mise"
       },
       {
         "include": [
-          "."
+          "out"
         ],
         "step": "build"
       }
@@ -137,7 +164,7 @@ expression: plan
       "ASPNETCORE_CONTENTROOT": "/app/out",
       "ASPNETCORE_ENVIRONMENT": "Production",
       "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
-      "DOTNET_NOLOGO": "1"
+      "DOTNET_ROOT": "/mise/installs/dotnet/8.0"
     }
   }
 }

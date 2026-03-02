@@ -1,7 +1,6 @@
 /// test.json 配置解析
 ///
 /// 每个 fixture 目录可包含 test.json 文件，定义集成测试行为。
-
 use std::collections::HashMap;
 
 /// 测试配置
@@ -52,10 +51,9 @@ fn default_retries() -> u32 {
 impl TestConfig {
     /// 从文件加载
     pub fn load(path: &str) -> Result<Self, String> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("failed to read {}: {}", path, e))?;
-        serde_json::from_str(&content)
-            .map_err(|e| format!("failed to parse {}: {}", path, e))
+        let content =
+            std::fs::read_to_string(path).map_err(|e| format!("failed to read {}: {}", path, e))?;
+        serde_json::from_str(&content).map_err(|e| format!("failed to parse {}: {}", path, e))
     }
 }
 

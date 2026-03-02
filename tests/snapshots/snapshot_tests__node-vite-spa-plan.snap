@@ -100,7 +100,7 @@ expression: plan
       ],
       "caches": [
         "node-modules",
-        "node_modules-vite"
+        "vite"
       ]
     },
     {
@@ -112,15 +112,38 @@ expression: plan
       ],
       "commands": [
         {
-          "cmd": "mise install-into caddy@2.0.0 /arcpack/caddy"
+          "cmd": "mise install-into caddy@latest.0.0 /railpack/caddy"
         },
         {
-          "path": "/arcpack/caddy"
+          "path": "/railpack/caddy"
         },
         {
-          "path": "/arcpack/caddy/bin"
+          "path": "/railpack/caddy/bin"
         }
       ]
+    },
+    {
+      "name": "caddy",
+      "inputs": [
+        {
+          "step": "packages:caddy"
+        }
+      ],
+      "commands": [
+        {
+          "path": "/Caddyfile",
+          "name": "Caddyfile"
+        },
+        {
+          "cmd": "caddy fmt --overwrite /Caddyfile"
+        }
+      ],
+      "secrets": [
+        "*"
+      ],
+      "assets": {
+        "Caddyfile": "# global options\n{\n\tadmin off\n\tpersist_config off\n\tauto_https off\n\n\tlog {\n\t\tformat json\n\t}\n\n\tservers {\n\t\ttrusted_proxies static private_ranges 100.0.0.0/8 # trust railway's proxy\n\t}\n}\n\n# site block, listens on the $PORT environment variable, automatically assigned by railway\n:{$PORT:80} {\n\tlog {\n\t\tformat json\n\t}\n\n\trespond /health 200\n\n\t# Security headers\n\theader {\n\t\t# Prevent some browsers from MIME-sniffing a response away from the declared Content-Type\n\t\tX-Content-Type-Options \"nosniff\"\n\t\t# Remove Server header\n\t\t-Server\n\t}\n\n\t# serve from the 'dist' folder (Vite builds into the 'dist' folder)\n\troot * /app/dist\n\n\t# Handle static files\n\tfile_server {\n\t\thide .git\n\t\thide .env*\n\t}\n\n\t# Compression with more formats\n\tencode {\n\t\tgzip\n\t\tzstd\n\t}\n\n\t# Try files with HTML extension and handle SPA routing\n\ttry_files {path} {path}.html {path}/index.html /index.html\n}\n"
+      }
     },
     {
       "name": "packages:apt:runtime",
@@ -142,16 +165,24 @@ expression: plan
     }
   ],
   "caches": {
+    "apt": {
+      "directory": "/var/cache/apt",
+      "type": "locked"
+    },
+    "apt-lists": {
+      "directory": "/var/lib/apt/lists",
+      "type": "locked"
+    },
     "node-modules": {
       "directory": "/app/node_modules/.cache",
       "type": "shared"
     },
-    "node_modules-vite": {
-      "directory": "/app/node_modules/.vite",
-      "type": "shared"
-    },
     "npm-install": {
       "directory": "/root/.npm",
+      "type": "shared"
+    },
+    "vite": {
+      "directory": "/app/node_modules/.vite",
       "type": "shared"
     }
   },
@@ -162,9 +193,15 @@ expression: plan
     "inputs": [
       {
         "include": [
-          "/arcpack/caddy"
+          "/railpack/caddy"
         ],
         "step": "packages:caddy"
+      },
+      {
+        "include": [
+          "/Caddyfile"
+        ],
+        "step": "caddy"
       },
       {
         "include": [
@@ -173,17 +210,13 @@ expression: plan
         "step": "build"
       }
     ],
-    "startCommand": "caddy run --config /app/Caddyfile --adapter caddyfile",
+    "startCommand": "caddy run --config /Caddyfile --adapter caddyfile 2>&1",
     "variables": {
       "CI": "true",
       "NODE_ENV": "production",
       "NPM_CONFIG_FUND": "false",
       "NPM_CONFIG_PRODUCTION": "false",
       "NPM_CONFIG_UPDATE_NOTIFIER": "false"
-    },
-    "paths": [
-      "/arcpack/caddy",
-      "/arcpack/caddy/bin"
-    ]
+    }
   }
 }

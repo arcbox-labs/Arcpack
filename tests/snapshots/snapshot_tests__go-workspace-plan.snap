@@ -56,6 +56,10 @@ expression: plan
           "dest": "go.work"
         },
         {
+          "src": "app/go.mod",
+          "dest": "app/go.mod"
+        },
+        {
           "cmd": "go mod download"
         }
       ],
@@ -66,7 +70,10 @@ expression: plan
         "CGO_ENABLED": "0",
         "GOBIN": "/go/bin",
         "GOPATH": "/go"
-      }
+      },
+      "caches": [
+        "go-build"
+      ]
     },
     {
       "name": "build",
@@ -83,7 +90,7 @@ expression: plan
       ],
       "commands": [
         {
-          "cmd": "go build -ldflags=\"-w -s\" -o out ."
+          "cmd": "go build -ldflags=\"-w -s\" -o out ./app"
         }
       ],
       "secrets": [
@@ -113,6 +120,14 @@ expression: plan
     }
   ],
   "caches": {
+    "apt": {
+      "directory": "/var/cache/apt",
+      "type": "locked"
+    },
+    "apt-lists": {
+      "directory": "/var/lib/apt/lists",
+      "type": "locked"
+    },
     "go-build": {
       "directory": "/root/.cache/go-build",
       "type": "shared"

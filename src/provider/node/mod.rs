@@ -6,7 +6,7 @@ pub mod prune;
 pub mod spa;
 pub mod workspace;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::app::environment::Environment;
 use crate::app::App;
@@ -120,7 +120,15 @@ impl NodeProvider {
 
     /// Bun 运行时是否必需
     fn requires_bun(&self) -> bool {
-        self.package_manager == PackageManagerKind::Bun
+        if self.package_manager == PackageManagerKind::Bun {
+            return true;
+        }
+
+        self.package_json.as_ref().map_or(false, |pkg| {
+            pkg.scripts.values().any(|s| s.contains("bun"))
+                || pkg.has_dependency("bun")
+                || pkg.has_dependency("@types/bun")
+        })
     }
 
     /// 获取启动命令
@@ -330,9 +338,13 @@ impl NodeProvider {
                     COREPACK_HOME.to_string(),
                 )]));
                 step.add_command(Command::new_copy("package.json", "package.json"));
-                step.add_command(Command::new_exec_shell(
-                    "npm i -g corepack@latest && corepack enable && corepack prepare --activate",
-                ));
+                let corepack_cmd =
+                    "npm i -g corepack@latest && corepack enable && corepack prepare --activate";
+                let mut cmd = Command::new_exec_shell(corepack_cmd);
+                if let Command::Exec(exec) = &mut cmd {
+                    exec.custom_name = Some(corepack_cmd.to_string());
+                }
+                step.add_command(cmd);
             }
 
             step.add_command(Command::new_exec(format!(
@@ -379,6 +391,12 @@ impl NodeProvider {
             if pkg.has_script("build") {
                 step.add_command(Command::new_exec(self.package_manager.run_cmd("build")));
             }
+            if pkg.has_dependency("next") {
+                step.add_variables(&HashMap::from([(
+                    "NEXT_TELEMETRY_DISABLED".to_string(),
+                    "1".to_string(),
+                )]));
+            }
         }
 
         let cache_name = ctx.caches.add_cache("node-modules", NODE_MODULES_CACHE);
@@ -392,6 +410,7 @@ impl NodeProvider {
     ///
     /// 用于双语言构建场景（PHP/Ruby + Node.js），始终裁剪不依赖 PRUNE_DEPS 环境变量。
     pub fn prune_node_deps(&self, ctx: &mut GenerateContext, step_name: &str) -> Result<()> {
+        let install_cache = self.package_manager.get_install_cache(&mut ctx.caches);
         let prune_cmd = match self.package_manager {
             PackageManagerKind::Npm => "npm prune --omit=dev --ignore-scripts",
             PackageManagerKind::Pnpm => "pnpm prune --prod --ignore-scripts",
@@ -402,8 +421,92 @@ impl NodeProvider {
             PackageManagerKind::YarnBerry => "yarn workspaces focus --production --all",
         };
         let step = Self::get_command_step(&mut ctx.steps, step_name);
-        step.add_command(Command::new_exec_shell(prune_cmd));
+        step.add_cache(&install_cache);
+        step.secrets.clear();
+        if self.package_manager == PackageManagerKind::Npm {
+            step.add_variables(&HashMap::from([(
+                "NPM_CONFIG_PRODUCTION".to_string(),
+                "true".to_string(),
+            )]));
+        }
+
+        if prune_cmd.contains("&&") || prune_cmd.contains("||") || prune_cmd.contains(';') {
+            step.add_command(Command::new_exec_shell(prune_cmd));
+        } else {
+            step.add_command(Command::new_exec(prune_cmd));
+        }
         Ok(())
+    }
+
+    fn framework_cache_name(framework_name: &str, pkg_path: &str, cache_dir: &str) -> String {
+        let prefix = match framework_name {
+            "next" | "remix" | "vite" | "astro" | "react-router" => Some(framework_name),
+            _ => None,
+        };
+
+        if let Some(prefix) = prefix {
+            if pkg_path.is_empty() {
+                return prefix.to_string();
+            }
+            let sanitized = pkg_path.trim_matches('/').replace('/', "-");
+            return format!("{prefix}-{sanitized}");
+        }
+
+        cache_dir
+            .trim_start_matches("/app/")
+            .replace('/', "-")
+            .replace('.', "")
+    }
+
+    fn framework_cache_priority(framework_name: &str) -> usize {
+        match framework_name {
+            "next" => 0,
+            "remix" => 1,
+            "vite" => 2,
+            "astro" => 3,
+            "react-router" => 4,
+            _ => 10,
+        }
+    }
+
+    fn command_removes_node_modules(cmd: &str) -> bool {
+        let lower = cmd.to_ascii_lowercase();
+        lower.contains("npm ci")
+            || lower.contains("rimraf node_modules")
+            || lower.contains("rm -rf node_modules")
+            || lower.contains("rm -r node_modules")
+            || lower.contains("rmdir node_modules")
+    }
+
+    fn cleanse_node_modules_cache_on_mutating_commands(plan: &mut crate::plan::BuildPlan) {
+        let Some(node_modules_cache_key) = plan
+            .caches
+            .iter()
+            .find(|(_, v)| v.directory == NODE_MODULES_CACHE)
+            .map(|(k, _)| k.clone())
+        else {
+            return;
+        };
+
+        for step in &mut plan.steps {
+            if step.name.as_deref() == Some("install") {
+                continue;
+            }
+
+            let mut removes_node_modules = false;
+            for command in &step.commands {
+                if let Command::Exec(exec) = command {
+                    if Self::command_removes_node_modules(&exec.cmd) {
+                        removes_node_modules = true;
+                        break;
+                    }
+                }
+            }
+
+            if removes_node_modules {
+                step.caches.retain(|cache| cache != &node_modules_cache_key);
+            }
+        }
     }
 }
 
@@ -468,24 +571,17 @@ impl Provider for NodeProvider {
 
         // === 框架检测 ===
         let pkg = self.package_json.as_ref().unwrap();
+        let root_frameworks = frameworks::detect_frameworks(&ctx.app, &ctx.env, pkg, "");
 
         // 框架检测优先级：根项目 > 第一个按路径排序匹配的 workspace 子包
         // 若 monorepo 有多个子包各自用不同框架，仅取第一个（first-match-wins）
-        let primary_framework = frameworks::detect_frameworks(&ctx.app, &ctx.env, pkg, "")
-            .first()
-            .cloned()
-            .or_else(|| {
-                self.workspace_packages.iter().find_map(|ws_pkg| {
-                    frameworks::detect_frameworks(
-                        &ctx.app,
-                        &ctx.env,
-                        &ws_pkg.package_json,
-                        &ws_pkg.path,
-                    )
+        let primary_framework = root_frameworks.first().cloned().or_else(|| {
+            self.workspace_packages.iter().find_map(|ws_pkg| {
+                frameworks::detect_frameworks(&ctx.app, &ctx.env, &ws_pkg.package_json, &ws_pkg.path)
                     .first()
                     .cloned()
-                })
-            });
+            })
+        });
 
         if let Some(ref fw) = primary_framework {
             ctx.metadata.set("nodeFramework", &fw.name);
@@ -496,17 +592,52 @@ impl Provider for NodeProvider {
                     frameworks::DeployMode::Spa => "spa",
                 },
             );
+        }
 
-            // 框架特定缓存目录
+        let astro_ssr = primary_framework
+            .as_ref()
+            .is_some_and(|fw| fw.name == "astro" && fw.mode == frameworks::DeployMode::Ssr);
+        if astro_ssr {
+            let install = Self::get_command_step(&mut ctx.steps, "install");
+            install.add_variables(&HashMap::from([("HOST".to_string(), "0.0.0.0".to_string())]));
+        }
+
+        // railpack 语义：缓存按“所有命中的框架”收集，而非仅主框架。
+        // 缓存顺序需稳定（next/remix/vite/astro/react-router）以避免对拍噪音。
+        let mut framework_caches: Vec<(usize, String, String)> = Vec::new();
+        for fw in &root_frameworks {
             for cache_dir in &fw.cache_dirs {
-                let cache_name = cache_dir
-                    .trim_start_matches("/app/")
-                    .replace('/', "-")
-                    .replace('.', "");
-                ctx.caches.add_cache(&cache_name, cache_dir);
-                let build = Self::get_command_step(&mut ctx.steps, "build");
-                build.add_cache(&cache_name);
+                let cache_name = Self::framework_cache_name(&fw.name, "", cache_dir);
+                framework_caches.push((
+                    Self::framework_cache_priority(&fw.name),
+                    cache_name,
+                    cache_dir.clone(),
+                ));
             }
+        }
+        for ws_pkg in &self.workspace_packages {
+            let ws_frameworks =
+                frameworks::detect_frameworks(&ctx.app, &ctx.env, &ws_pkg.package_json, &ws_pkg.path);
+            for fw in ws_frameworks {
+                for cache_dir in fw.cache_dirs {
+                    let cache_name = Self::framework_cache_name(&fw.name, &ws_pkg.path, &cache_dir);
+                    framework_caches.push((
+                        Self::framework_cache_priority(&fw.name),
+                        cache_name,
+                        cache_dir,
+                    ));
+                }
+            }
+        }
+        framework_caches.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut seen_cache_names = HashSet::new();
+        for (_, cache_name, cache_dir) in framework_caches {
+            if !seen_cache_names.insert(cache_name.clone()) {
+                continue;
+            }
+            ctx.caches.add_cache(&cache_name, &cache_dir);
+            let build = Self::get_command_step(&mut ctx.steps, "build");
+            build.add_cache(&cache_name);
         }
 
         // === Workspace 元数据 ===
@@ -587,6 +718,11 @@ impl Provider for NodeProvider {
         for (k, v) in &deploy_env_vars {
             ctx.deploy.variables.insert(k.clone(), v.clone());
         }
+        if astro_ssr {
+            ctx.deploy
+                .variables
+                .insert("HOST".to_string(), "0.0.0.0".to_string());
+        }
 
         // Puppeteer 检测 → 添加 Chromium APT 依赖
         if let Some(ref pkg) = self.package_json {
@@ -598,13 +734,6 @@ impl Provider for NodeProvider {
             }
         }
 
-        // COREPACK_HOME 环境变量（deploy）
-        if uses_corepack {
-            ctx.deploy
-                .variables
-                .insert("COREPACK_HOME".to_string(), COREPACK_HOME.to_string());
-        }
-
         Ok(())
     }
 
@@ -614,6 +743,7 @@ impl Provider for NodeProvider {
             .iter()
             .any(|s| s.name.as_deref() == Some("prune"));
         prune::cleanse_plan_for_prune(plan, has_prune);
+        Self::cleanse_node_modules_cache_on_mutating_commands(plan);
     }
 
     fn start_command_help(&self) -> Option<String> {
@@ -809,6 +939,25 @@ mod tests {
         let mut provider = NodeProvider::new();
         provider.initialize(&mut ctx).unwrap();
         assert!(!provider.uses_corepack());
+    }
+
+    #[test]
+    fn test_requires_bun_when_script_uses_bun() {
+        let dir = TempDir::new().unwrap();
+        setup_node_project(
+            &dir,
+            r#"{
+            "name": "test",
+            "scripts": { "start": "bun index.ts" }
+        }"#,
+        );
+        fs::write(dir.path().join("pnpm-lock.yaml"), "lockfileVersion: '9.0'").unwrap();
+
+        let mut ctx = make_ctx(&dir);
+        let mut provider = NodeProvider::new();
+        provider.initialize(&mut ctx).unwrap();
+        assert_eq!(provider.package_manager, PackageManagerKind::Pnpm);
+        assert!(provider.requires_bun());
     }
 
     #[test]

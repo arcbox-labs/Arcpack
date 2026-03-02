@@ -2,6 +2,10 @@
 ///
 /// 对齐 railpack `core/providers/rust/rust.go`
 /// 支持 workspace、WASM 目标、依赖预编译优化、多种版本来源。
+use std::collections::HashSet;
+use std::path::Path;
+
+use regex::Regex;
 use serde::Deserialize;
 
 use crate::app::environment::Environment;
@@ -10,6 +14,7 @@ use crate::generate::command_step_builder::CommandStepBuilder;
 use crate::generate::mise_step_builder::{self, MiseStepBuilder};
 use crate::generate::GenerateContext;
 use crate::plan::cache::CacheType;
+use crate::plan::command::FileCommand;
 use crate::plan::{Command, Filter, Layer};
 use crate::provider::Provider;
 use crate::Result;
@@ -21,6 +26,7 @@ const DEFAULT_RUST_VERSION: &str = "1.89";
 #[derive(Debug, Deserialize, Default)]
 struct CargoToml {
     package: Option<CargoPackage>,
+    lib: Option<CargoLib>,
     workspace: Option<CargoWorkspace>,
     bin: Option<Vec<CargoBin>>,
 }
@@ -31,18 +37,25 @@ struct CargoPackage {
     name: Option<String>,
     edition: Option<String>,
     rust_version: Option<String>,
-    #[allow(dead_code)]
     default_run: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
+struct CargoLib {
+    name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
 struct CargoWorkspace {
-    #[allow(dead_code)]
     members: Option<Vec<String>>,
+    default_members: Option<Vec<String>>,
+    exclude: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Default)]
 struct CargoBin {
+    #[allow(dead_code)]
     name: Option<String>,
 }
 
@@ -55,45 +68,50 @@ struct RustToolchain {
 #[derive(Debug, Deserialize, Default)]
 struct RustToolchainSection {
     channel: Option<String>,
+    version: Option<String>,
 }
 
 /// Rust Provider
 pub struct RustProvider {
     cargo_toml: Option<CargoToml>,
-    is_workspace: bool,
     is_wasm: bool,
-    binary_name: Option<String>,
 }
 
 impl RustProvider {
     pub fn new() -> Self {
         Self {
             cargo_toml: None,
-            is_workspace: false,
             is_wasm: false,
-            binary_name: None,
         }
     }
 
     /// edition 到最低 Rust 版本的映射
     fn edition_to_version(edition: &str) -> Option<&'static str> {
         match edition {
-            "2015" => Some("1.30"),
-            "2018" => Some("1.55"),
-            "2021" => Some("1.84"),
+            "2015" => Some("1.30.0"),
+            "2018" => Some("1.55.0"),
+            "2021" => Some("1.84.0"),
             "2024" => Some("1.85.1"),
             _ => None,
         }
     }
 
+    fn extract_semver(value: &str) -> Option<String> {
+        let re = Regex::new(r"(\d+\.\d+(?:\.\d+)?)").ok()?;
+        let caps = re.captures(value)?;
+        caps.get(1).map(|m| m.as_str().to_string())
+    }
+
     /// 7 级版本解析
     fn resolve_version(&self, app: &App, env: &Environment) -> String {
+        let mut resolved = DEFAULT_RUST_VERSION.to_string();
+
         // 1. Cargo.toml edition 映射
         if let Some(ref cargo) = self.cargo_toml {
             if let Some(ref pkg) = cargo.package {
                 if let Some(ref edition) = pkg.edition {
                     if let Some(v) = Self::edition_to_version(edition) {
-                        return v.to_string();
+                        resolved = v.to_string();
                     }
                 }
             }
@@ -101,15 +119,16 @@ impl RustProvider {
 
         // 2. ARCPACK_RUST_VERSION
         if let (Some(v), _) = env.get_config_variable("RUST_VERSION") {
-            return v;
+            if !v.is_empty() {
+                resolved = v;
+            }
         }
 
         // 3. rust-version.txt 或 .rust-version
         for file in &["rust-version.txt", ".rust-version"] {
             if let Ok(content) = app.read_file(file) {
-                let v = content.trim().to_string();
-                if !v.is_empty() {
-                    return v;
+                if let Some(v) = Self::extract_semver(content.trim()) {
+                    resolved = v;
                 }
             }
         }
@@ -118,7 +137,9 @@ impl RustProvider {
         if let Some(ref cargo) = self.cargo_toml {
             if let Some(ref pkg) = cargo.package {
                 if let Some(ref v) = pkg.rust_version {
-                    return v.clone();
+                    if let Some(v) = Self::extract_semver(v) {
+                        resolved = v;
+                    }
                 }
             }
         }
@@ -127,8 +148,9 @@ impl RustProvider {
         if let Ok(content) = app.read_file("rust-toolchain.toml") {
             if let Ok(tc) = toml::from_str::<RustToolchain>(&content) {
                 if let Some(toolchain) = tc.toolchain {
-                    if let Some(channel) = toolchain.channel {
-                        return channel;
+                    let source = toolchain.channel.or(toolchain.version).unwrap_or_default();
+                    if let Some(v) = Self::extract_semver(&source) {
+                        resolved = v;
                     }
                 }
             }
@@ -136,14 +158,12 @@ impl RustProvider {
 
         // 6. rust-toolchain 文件
         if let Ok(content) = app.read_file("rust-toolchain") {
-            let v = content.trim().to_string();
-            if !v.is_empty() {
-                return v;
+            if let Some(v) = Self::extract_semver(content.trim()) {
+                resolved = v;
             }
         }
 
-        // 7. 默认
-        DEFAULT_RUST_VERSION.to_string()
+        resolved
     }
 
     /// 检测 WASM 目标
@@ -157,30 +177,175 @@ impl RustProvider {
         false
     }
 
-    /// 获取 start command
-    fn get_start_command(&self, env: &Environment) -> Option<String> {
-        // 1. ARCPACK_CARGO_WORKSPACE
+    fn get_target(&self) -> Option<&'static str> {
+        if self.is_wasm {
+            return Some("wasm32-wasi");
+        }
+        None
+    }
+
+    fn get_bin_suffix(&self) -> &'static str {
+        if self.is_wasm {
+            ".wasm"
+        } else {
+            ""
+        }
+    }
+
+    fn get_app_name(&self) -> String {
+        self.cargo_toml
+            .as_ref()
+            .and_then(|cargo| cargo.package.as_ref())
+            .and_then(|pkg| pkg.name.clone())
+            .unwrap_or_default()
+    }
+
+    fn resolve_workspace_binary(&self, app: &App, env: &Environment) -> Option<String> {
         if let (Some(name), _) = env.get_config_variable("CARGO_WORKSPACE") {
-            return Some(format!("./bin/{}", name));
-        }
-
-        // 2. workspace 二进制
-        // 简化：workspace 场景使用 binary_name
-        if self.is_workspace {
-            if let Some(ref name) = self.binary_name {
-                return Some(format!("./bin/{}", name));
+            if !name.is_empty() {
+                return Some(name);
             }
         }
 
-        // 3. 单二进制
-        if let Some(ref name) = self.binary_name {
-            if self.is_wasm {
-                return Some(format!("./bin/{}.wasm", name));
+        let workspace = self
+            .cargo_toml
+            .as_ref()
+            .and_then(|cargo| cargo.workspace.as_ref())?;
+
+        let mut seen = HashSet::new();
+        let mut members = Vec::new();
+        if let Some(default_members) = &workspace.default_members {
+            members.extend(default_members.clone());
+        }
+        if let Some(all_members) = &workspace.members {
+            members.extend(all_members.clone());
+        }
+
+        let excludes: HashSet<String> = workspace
+            .exclude
+            .as_ref()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+
+        for member in members {
+            if excludes.contains(&member) || !seen.insert(member.clone()) {
+                continue;
             }
-            return Some(format!("./bin/{}", name));
+
+            let candidates = if member.contains('*') || member.contains('?') {
+                app.find_directories(&member).unwrap_or_default()
+            } else {
+                vec![member]
+            };
+
+            for candidate in candidates {
+                if let Some(bin) = Self::find_binary_in_workspace_member(app, &candidate) {
+                    return Some(bin);
+                }
+            }
         }
 
         None
+    }
+
+    fn find_binary_in_workspace_member(app: &App, member_dir: &str) -> Option<String> {
+        let manifest_path = format!("{member_dir}/Cargo.toml");
+        let manifest = app.read_toml::<CargoToml>(&manifest_path).ok()?;
+        let package_name = manifest
+            .package
+            .as_ref()
+            .and_then(|pkg| pkg.name.as_ref())
+            .cloned()?;
+
+        let has_main = app.has_file(&format!("{member_dir}/src/main.rs"));
+        let has_bin_dir = app.has_match(&format!("{member_dir}/src/bin"));
+        let has_manifest_bins = manifest.bin.as_ref().is_some_and(|bins| !bins.is_empty());
+        let has_lib = app.has_file(&format!("{member_dir}/src/lib.rs"));
+
+        if has_main || has_bin_dir || has_manifest_bins || !has_lib {
+            return Some(package_name);
+        }
+
+        None
+    }
+
+    fn get_bins(&self, app: &App) -> Vec<String> {
+        let mut bins = Vec::new();
+
+        let app_name = self.get_app_name();
+        if !app_name.is_empty() && app.has_file("src/main.rs") {
+            bins.push(app_name);
+        }
+
+        if app.has_match("src/bin") {
+            let find_bins = app.find_files("src/bin/*").unwrap_or_default();
+            for bin_path in find_bins {
+                let Some(filename) = Path::new(&bin_path).file_name().and_then(|s| s.to_str())
+                else {
+                    continue;
+                };
+                let parts: Vec<&str> = filename.split('.').collect();
+                if parts.len() <= 1 {
+                    continue;
+                }
+
+                let name = parts[..parts.len() - 1].join(".");
+                if !name.is_empty() {
+                    bins.push(name);
+                }
+            }
+        }
+
+        bins
+    }
+
+    fn get_start_bin(&self, app: &App, env: &Environment) -> Option<String> {
+        let bins = self.get_bins(app);
+        if bins.is_empty() {
+            return None;
+        }
+
+        let mut selected = String::new();
+        if bins.len() == 1 {
+            selected = bins[0].clone();
+        } else if let (Some(bin), _) = env.get_config_variable("RUST_BIN") {
+            if bins.iter().any(|b| b == &bin) {
+                selected = bin;
+            }
+        } else if let Some(default_run) = self
+            .cargo_toml
+            .as_ref()
+            .and_then(|cargo| cargo.package.as_ref())
+            .and_then(|pkg| pkg.default_run.as_ref())
+        {
+            selected = default_run.clone();
+        }
+
+        if selected.is_empty() {
+            return None;
+        }
+
+        Some(format!("./bin/{}{}", selected, self.get_bin_suffix()))
+    }
+
+    fn get_start_command(&self, app: &App, env: &Environment) -> Option<String> {
+        let target = self.get_target();
+        let workspace = self.resolve_workspace_binary(app, env);
+
+        if target.is_some() {
+            if let Some(workspace) = workspace {
+                return Some(format!("./bin/{workspace}"));
+            }
+            return self.get_start_bin(app, env);
+        }
+
+        if let Some(workspace) = workspace {
+            return Some(format!("./bin/{workspace}"));
+        }
+
+        self.get_start_bin(app, env)
     }
 
     /// 确保 mise_step_builder 已初始化
@@ -218,8 +383,6 @@ impl Provider for RustProvider {
     fn initialize(&mut self, ctx: &mut GenerateContext) -> Result<()> {
         // 解析 Cargo.toml
         if let Ok(cargo) = ctx.app.read_toml::<CargoToml>("Cargo.toml") {
-            self.is_workspace = cargo.workspace.is_some();
-            self.binary_name = Self::get_binary_name_from_cargo(&cargo);
             self.cargo_toml = Some(cargo);
         }
 
@@ -246,6 +409,30 @@ impl Provider for RustProvider {
             .as_ref()
             .map(|m| m.name().to_string())
             .unwrap_or_else(|| mise_step_builder::MISE_STEP_NAME.to_string());
+        let workspace_binary = self.resolve_workspace_binary(&ctx.app, &ctx.env);
+        let app_name = self.get_app_name();
+        let target_arg = self
+            .get_target()
+            .map(|target| format!(" --target {target}"))
+            .unwrap_or_default();
+        let target_path = self
+            .get_target()
+            .map(|target| format!("{target}/"))
+            .unwrap_or_default();
+        let bin_suffix = self.get_bin_suffix();
+
+        let cargo_registry_cache = ctx
+            .caches
+            .add_cache("cargo_registry", "/root/.cargo/registry");
+        let cargo_git_cache = ctx.caches.add_cache("cargo_git", "/root/.cargo/git");
+        let cargo_target_cache = if !app_name.is_empty() {
+            Some(
+                ctx.caches
+                    .add_cache_with_type("cargo_target", "target", CacheType::Shared),
+            )
+        } else {
+            None
+        };
 
         // === install 步骤（依赖预编译） ===
         let install = ctx.new_command_step("install");
@@ -253,113 +440,105 @@ impl Provider for RustProvider {
 
         {
             let install = Self::get_command_step(&mut ctx.steps, "install");
+            install.add_cache(&cargo_registry_cache);
+            install.add_cache(&cargo_git_cache);
 
-            // 复制 Cargo.toml 和 Cargo.lock
-            install.add_command(Command::new_copy("Cargo.toml", "Cargo.toml"));
-            if ctx.app.has_file("Cargo.lock") {
-                install.add_command(Command::new_copy("Cargo.lock", "Cargo.lock"));
+            install.add_command(Command::new_copy("Cargo.toml*", "."));
+            install.add_command(Command::new_copy("Cargo.lock*", "."));
+
+            if let Some(target) = self.get_target() {
+                install.add_command(Command::new_exec(format!("rustup target add {target}")));
             }
 
-            // 依赖预编译（非 workspace）
-            if !self.is_workspace {
-                // 注入空 src/main.rs
-                install.add_command(Command::new_exec("mkdir -p src"));
-                install.add_command(Command::new_exec("echo 'fn main() {}' > src/main.rs"));
-
-                // 检查是否有 [lib] 节
-                let has_lib = self.cargo_toml.as_ref().map_or(false, |_| {
-                    // 简化处理：默认不添加空 lib.rs
-                    false
-                });
+            // workspace 场景不做依赖预编译
+            if workspace_binary.is_none() {
+                install
+                    .assets
+                    .insert("main.rs".to_string(), "fn main() { }".to_string());
+                let has_lib = self
+                    .cargo_toml
+                    .as_ref()
+                    .and_then(|cargo| cargo.lib.as_ref())
+                    .and_then(|lib| lib.name.as_ref())
+                    .is_some();
                 if has_lib {
-                    install.add_command(Command::new_exec("touch src/lib.rs"));
+                    install
+                        .assets
+                        .insert("lib.rs".to_string(), "fn main() { }".to_string());
                 }
 
-                install.add_command(Command::new_exec("cargo build --release"));
-                // 清理注入的文件，强制重编译真实源码
-                install.add_command(Command::new_exec("rm -rf src"));
+                install.add_command(Command::new_exec("mkdir -p src"));
+                install.add_command(Command::File(FileCommand {
+                    path: "src/main.rs".to_string(),
+                    name: "main.rs".to_string(),
+                    mode: None,
+                    custom_name: Some("compile dependencies".to_string()),
+                }));
+                if has_lib {
+                    install.add_command(Command::new_file("src/lib.rs", "lib.rs"));
+                }
+
+                install.add_command(Command::new_exec(format!(
+                    "cargo build --release{target_arg}"
+                )));
+                install.add_command(Command::new_exec(format!(
+                    "rm -rf src target/{}release/{}*",
+                    target_path, app_name
+                )));
             }
         }
 
         // === build 步骤 ===
         let build = ctx.new_command_step("build");
+        build.add_input(Layer::new_step_layer(&mise_step_name, None));
         build.add_input(Layer::new_step_layer(
             "install",
             Some(Filter {
-                include: vec![".".to_string()],
-                exclude: vec![
-                    "/app/src".to_string(),
-                    "/app/benches".to_string(),
-                    "/app/examples".to_string(),
-                ],
+                include: vec![],
+                exclude: vec!["/app/".to_string()],
             }),
         ));
         {
             let local_layer = ctx.new_local_layer();
             let build = Self::get_command_step(&mut ctx.steps, "build");
             build.add_input(local_layer);
-
-            // 构建命令
-            let mut build_cmd = "cargo build --release".to_string();
-            if self.is_wasm {
-                build_cmd.push_str(" --target wasm32-wasi");
+            if let Some(cache) = &cargo_target_cache {
+                build.add_cache(cache);
             }
-            build.add_command(Command::new_exec(&build_cmd));
-
-            // 复制二进制到 bin/
             build.add_command(Command::new_exec("mkdir -p bin"));
-            if let Some(ref name) = self.binary_name {
-                if self.is_wasm {
-                    build.add_command(Command::new_exec(format!(
-                        "cp target/wasm32-wasi/release/{}.wasm bin/",
-                        name
-                    )));
-                } else {
-                    build.add_command(Command::new_exec(format!(
-                        "cp target/release/{} bin/",
-                        name
-                    )));
-                }
+
+            if let Some(target) = self.get_target() {
+                build.add_command(Command::new_exec(format!("rustup target add {target}")));
             }
 
-            // src/bin/*.rs 额外二进制检测
-            if let Ok(bin_files) = ctx.app.find_files("src/bin/*.rs") {
-                let (target_dir, ext) = if self.is_wasm {
-                    ("wasm32-wasi/release", ".wasm")
-                } else {
-                    ("release", "")
-                };
-                for bin_file in &bin_files {
-                    let bin_name = std::path::Path::new(bin_file)
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("");
-                    // 跳过与主二进制同名的
-                    if !bin_name.is_empty() && self.binary_name.as_deref() != Some(bin_name) {
+            if let Some(workspace) = workspace_binary {
+                build.add_command(Command::new_exec(format!(
+                    "cargo build --release --package {}{}",
+                    workspace, target_arg
+                )));
+                build.add_command(Command::new_exec(format!(
+                    "cp target/{}release/{}{} bin",
+                    target_path, workspace, bin_suffix
+                )));
+            } else {
+                let bins = self.get_bins(&ctx.app);
+                if !bins.is_empty() {
+                    build.add_command(Command::new_exec(format!(
+                        "cargo build --release{}",
+                        target_arg
+                    )));
+                    for bin in bins {
                         build.add_command(Command::new_exec(format!(
-                            "cp target/{target_dir}/{bin_name}{ext} bin/"
+                            "cp target/{}release/{}{} bin",
+                            target_path, bin, bin_suffix
                         )));
                     }
                 }
             }
         }
 
-        // 缓存
-        ctx.caches
-            .add_cache("cargo_registry", "/root/.cargo/registry");
-        ctx.caches.add_cache("cargo_git", "/root/.cargo/git");
-        ctx.caches
-            .add_cache_with_type("cargo_target", "target", CacheType::Locked);
-
-        {
-            let build = Self::get_command_step(&mut ctx.steps, "build");
-            build.add_cache("cargo_registry");
-            build.add_cache("cargo_git");
-            build.add_cache("cargo_target");
-        }
-
         // === Deploy 配置 ===
-        ctx.deploy.start_cmd = self.get_start_command(&ctx.env);
+        ctx.deploy.start_cmd = self.get_start_command(&ctx.app, &ctx.env);
 
         // Deploy 环境变量
         ctx.deploy
@@ -388,26 +567,6 @@ impl Provider for RustProvider {
              The binary name is detected from Cargo.toml (package.name or [[bin]])"
                 .to_string(),
         )
-    }
-}
-
-impl RustProvider {
-    fn get_binary_name_from_cargo(cargo: &CargoToml) -> Option<String> {
-        // [[bin]] 中的第一个
-        if let Some(ref bins) = cargo.bin {
-            if let Some(bin) = bins.first() {
-                if let Some(ref name) = bin.name {
-                    return Some(name.clone());
-                }
-            }
-        }
-        // package.name
-        if let Some(ref pkg) = cargo.package {
-            if let Some(ref name) = pkg.name {
-                return Some(name.clone());
-            }
-        }
-        None
     }
 }
 
@@ -481,9 +640,9 @@ path = "src/main.rs"
 
     #[test]
     fn test_edition_to_version() {
-        assert_eq!(RustProvider::edition_to_version("2015"), Some("1.30"));
-        assert_eq!(RustProvider::edition_to_version("2018"), Some("1.55"));
-        assert_eq!(RustProvider::edition_to_version("2021"), Some("1.84"));
+        assert_eq!(RustProvider::edition_to_version("2015"), Some("1.30.0"));
+        assert_eq!(RustProvider::edition_to_version("2018"), Some("1.55.0"));
+        assert_eq!(RustProvider::edition_to_version("2021"), Some("1.84.0"));
         assert_eq!(RustProvider::edition_to_version("2024"), Some("1.85.1"));
         assert_eq!(RustProvider::edition_to_version("unknown"), None);
     }
@@ -496,7 +655,7 @@ path = "src/main.rs"
         let mut provider = RustProvider::new();
         provider.initialize(&mut ctx).unwrap();
         let version = provider.resolve_version(&ctx.app, &ctx.env);
-        assert_eq!(version, "1.84"); // edition 2021
+        assert_eq!(version, "1.84.0"); // edition 2021
     }
 
     #[test]
@@ -582,7 +741,11 @@ path = "src/main.rs"
         let mut ctx = make_ctx(&dir);
         let mut provider = RustProvider::new();
         provider.initialize(&mut ctx).unwrap();
-        assert!(provider.is_workspace);
+        assert!(provider
+            .cargo_toml
+            .as_ref()
+            .and_then(|c| c.workspace.as_ref())
+            .is_some());
     }
 
     // === binary name 测试 ===
@@ -594,7 +757,7 @@ path = "src/main.rs"
         let mut ctx = make_ctx(&dir);
         let mut provider = RustProvider::new();
         provider.initialize(&mut ctx).unwrap();
-        assert_eq!(provider.binary_name, Some("my-app".to_string()));
+        assert_eq!(provider.get_app_name(), "my-app".to_string());
     }
 
     #[test]
@@ -608,7 +771,7 @@ path = "src/main.rs"
         let mut ctx = make_ctx(&dir);
         let mut provider = RustProvider::new();
         provider.initialize(&mut ctx).unwrap();
-        assert_eq!(provider.binary_name, Some("server".to_string()));
+        assert_eq!(provider.get_app_name(), "server".to_string());
     }
 
     // === plan 测试 ===
@@ -649,7 +812,7 @@ path = "src/main.rs"
     }
 
     #[test]
-    fn test_plan_cargo_target_locked_cache() {
+    fn test_plan_cargo_target_shared_cache() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("Cargo.toml"), basic_cargo_toml()).unwrap();
         fs::create_dir(dir.path().join("src")).unwrap();
@@ -661,6 +824,35 @@ path = "src/main.rs"
         provider.plan(&mut ctx).unwrap();
 
         let cache = ctx.caches.get_cache("cargo_target").unwrap();
-        assert_eq!(cache.cache_type, CacheType::Locked);
+        assert_eq!(cache.cache_type, CacheType::Shared);
+    }
+
+    #[test]
+    fn test_workspace_plan_skips_cargo_target_cache() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            r#"[workspace]
+members = ["a"]"#,
+        )
+        .unwrap();
+        fs::create_dir(dir.path().join("a")).unwrap();
+        fs::write(
+            dir.path().join("a/Cargo.toml"),
+            r#"[package]
+name = "a"
+version = "0.1.0"
+edition = "2021""#,
+        )
+        .unwrap();
+        fs::create_dir_all(dir.path().join("a/src")).unwrap();
+        fs::write(dir.path().join("a/src/main.rs"), "fn main() {}").unwrap();
+
+        let mut ctx = make_ctx(&dir);
+        let mut provider = RustProvider::new();
+        provider.initialize(&mut ctx).unwrap();
+        provider.plan(&mut ctx).unwrap();
+
+        assert!(ctx.caches.get_cache("cargo_target").is_none());
     }
 }

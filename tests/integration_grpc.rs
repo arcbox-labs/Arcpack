@@ -2,17 +2,15 @@
 ///
 /// 需要 buildkitd 运行环境，标记 #[ignore]。
 /// 通过 `cargo test -- --ignored` 运行。
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use arcpack::buildkit::grpc_client::{GrpcBuildKitClient, GrpcBuildRequest, build_export_config};
-use arcpack::buildkit::grpc::progress::ProgressMode;
 use arcpack::buildkit::convert::{convert_plan_to_llb, ConvertPlanOptions};
+use arcpack::buildkit::grpc::progress::ProgressMode;
+use arcpack::buildkit::grpc_client::{build_export_config, GrpcBuildKitClient, GrpcBuildRequest};
 use arcpack::buildkit::platform::Platform;
 use arcpack::plan::{
-    BuildPlan, Command, Deploy, Filter, Layer, Step,
-    ARCPACK_BUILDER_IMAGE, ARCPACK_RUNTIME_IMAGE,
+    BuildPlan, Command, Deploy, Filter, Layer, Step, ARCPACK_BUILDER_IMAGE, ARCPACK_RUNTIME_IMAGE,
 };
 
 /// 创建简单的 Node.js plan
@@ -26,10 +24,10 @@ fn simple_node_plan() -> BuildPlan {
     plan.add_step(packages);
 
     let mut install = Step::new("install");
+    install.inputs.push(Layer::new_step_layer("packages", None));
     install
-        .inputs
-        .push(Layer::new_step_layer("packages", None));
-    install.commands.push(Command::new_exec("echo 'npm install'"));
+        .commands
+        .push(Command::new_exec("echo 'npm install'"));
     plan.add_step(install);
 
     plan.deploy = Deploy {
@@ -64,8 +62,7 @@ async fn test_grpc_build_via_solve() {
     };
 
     // 转换为 LLB
-    let llb_result = convert_plan_to_llb(&plan, &opts)
-        .expect("convert_plan_to_llb 不应失败");
+    let llb_result = convert_plan_to_llb(&plan, &opts).expect("convert_plan_to_llb 不应失败");
 
     assert!(
         !llb_result.definition.def.is_empty(),
@@ -74,12 +71,8 @@ async fn test_grpc_build_via_solve() {
 
     // 构建 export 配置
     let output_dir = tempfile::tempdir().expect("创建临时目录失败");
-    let export = build_export_config(
-        None,
-        Some(&output_dir.path().to_path_buf()),
-        false,
-    )
-    .expect("build_export_config 不应失败");
+    let export = build_export_config(None, Some(&output_dir.path().to_path_buf()), false)
+        .expect("build_export_config 不应失败");
 
     // 连接 buildkitd
     let addr = std::env::var("BUILDKIT_HOST")
@@ -102,11 +95,7 @@ async fn test_grpc_build_via_solve() {
         cache_exports: vec![],
     };
 
-    let output = client.build(request).await
-        .expect("gRPC build 不应失败");
+    let output = client.build(request).await.expect("gRPC build 不应失败");
 
-    assert!(
-        output.duration.as_millis() > 0,
-        "构建耗时应大于 0"
-    );
+    assert!(output.duration.as_millis() > 0, "构建耗时应大于 0");
 }
