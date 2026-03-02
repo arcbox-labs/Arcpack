@@ -1,10 +1,9 @@
+use crate::app::environment::Environment;
 /// Laravel 支持
 ///
 /// 对齐 railpack `core/providers/php/php.go` Laravel 部分
 /// 检测 artisan 文件、根目录覆盖、构建缓存命令。
-
 use crate::app::App;
-use crate::app::environment::Environment;
 
 /// 检测 Laravel 应用
 pub fn detect_laravel(app: &App) -> bool {

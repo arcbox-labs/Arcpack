@@ -40,10 +40,7 @@ mod tests {
 
     #[test]
     fn test_filter_new_creates_both_fields() {
-        let f = Filter::new(
-            vec!["src/**".to_string()],
-            vec!["*.test.ts".to_string()],
-        );
+        let f = Filter::new(vec!["src/**".to_string()], vec!["*.test.ts".to_string()]);
         assert_eq!(f.include, vec!["src/**"]);
         assert_eq!(f.exclude, vec!["*.test.ts"]);
     }
@@ -64,10 +61,7 @@ mod tests {
 
     #[test]
     fn test_filter_json_roundtrip() {
-        let f = Filter::new(
-            vec!["*.go".to_string()],
-            vec!["vendor/**".to_string()],
-        );
+        let f = Filter::new(vec!["*.go".to_string()], vec!["vendor/**".to_string()]);
         let json = serde_json::to_string(&f).unwrap();
         let parsed: Filter = serde_json::from_str(&json).unwrap();
         assert_eq!(f, parsed);

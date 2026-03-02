@@ -2,11 +2,10 @@
 ///
 /// 对齐 railpack `core/providers/rust/rust.go`
 /// 支持 workspace、WASM 目标、依赖预编译优化、多种版本来源。
-
 use serde::Deserialize;
 
-use crate::app::App;
 use crate::app::environment::Environment;
+use crate::app::App;
 use crate::generate::command_step_builder::CommandStepBuilder;
 use crate::generate::mise_step_builder::{self, MiseStepBuilder};
 use crate::generate::GenerateContext;
@@ -265,9 +264,7 @@ impl Provider for RustProvider {
             if !self.is_workspace {
                 // 注入空 src/main.rs
                 install.add_command(Command::new_exec("mkdir -p src"));
-                install.add_command(Command::new_exec(
-                    "echo 'fn main() {}' > src/main.rs",
-                ));
+                install.add_command(Command::new_exec("echo 'fn main() {}' > src/main.rs"));
 
                 // 检查是否有 [lib] 节
                 let has_lib = self.cargo_toml.as_ref().map_or(false, |_| {
@@ -275,9 +272,7 @@ impl Provider for RustProvider {
                     false
                 });
                 if has_lib {
-                    install.add_command(Command::new_exec(
-                        "touch src/lib.rs",
-                    ));
+                    install.add_command(Command::new_exec("touch src/lib.rs"));
                 }
 
                 install.add_command(Command::new_exec("cargo build --release"));
@@ -288,10 +283,17 @@ impl Provider for RustProvider {
 
         // === build 步骤 ===
         let build = ctx.new_command_step("build");
-        build.add_input(Layer::new_step_layer("install", Some(Filter {
-            include: vec![".".to_string()],
-            exclude: vec!["/app/src".to_string(), "/app/benches".to_string(), "/app/examples".to_string()],
-        })));
+        build.add_input(Layer::new_step_layer(
+            "install",
+            Some(Filter {
+                include: vec![".".to_string()],
+                exclude: vec![
+                    "/app/src".to_string(),
+                    "/app/benches".to_string(),
+                    "/app/examples".to_string(),
+                ],
+            }),
+        ));
         {
             let local_layer = ctx.new_local_layer();
             let build = Self::get_command_step(&mut ctx.steps, "build");
@@ -333,9 +335,7 @@ impl Provider for RustProvider {
                         .and_then(|s| s.to_str())
                         .unwrap_or("");
                     // 跳过与主二进制同名的
-                    if !bin_name.is_empty()
-                        && self.binary_name.as_deref() != Some(bin_name)
-                    {
+                    if !bin_name.is_empty() && self.binary_name.as_deref() != Some(bin_name) {
                         build.add_command(Command::new_exec(format!(
                             "cp target/{target_dir}/{bin_name}{ext} bin/"
                         )));
@@ -345,9 +345,11 @@ impl Provider for RustProvider {
         }
 
         // 缓存
-        ctx.caches.add_cache("cargo_registry", "/root/.cargo/registry");
+        ctx.caches
+            .add_cache("cargo_registry", "/root/.cargo/registry");
         ctx.caches.add_cache("cargo_git", "/root/.cargo/git");
-        ctx.caches.add_cache_with_type("cargo_target", "target", CacheType::Locked);
+        ctx.caches
+            .add_cache_with_type("cargo_target", "target", CacheType::Locked);
 
         {
             let build = Self::get_command_step(&mut ctx.steps, "build");
@@ -638,7 +640,10 @@ path = "src/main.rs"
 
         // 验证 ROCKET_ADDRESS
         assert_eq!(
-            ctx.deploy.variables.get("ROCKET_ADDRESS").map(|s| s.as_str()),
+            ctx.deploy
+                .variables
+                .get("ROCKET_ADDRESS")
+                .map(|s| s.as_str()),
             Some("0.0.0.0")
         );
     }

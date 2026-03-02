@@ -7,12 +7,12 @@
 /// - local: 引用本地构建上下文（源码目录）
 ///
 /// Filter 通过 serde flatten 内嵌，include/exclude 提升到顶层 JSON 字段。
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use super::filter::Filter;
 use super::spread::Spreadable;
 
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Layer {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -25,6 +25,57 @@ pub struct Layer {
     pub spread: Option<bool>,
     #[serde(flatten)]
     pub filter: Filter,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LayerSerde {
+    #[serde(default)]
+    image: Option<String>,
+    #[serde(default)]
+    step: Option<String>,
+    #[serde(default)]
+    local: Option<bool>,
+    #[serde(default)]
+    spread: Option<bool>,
+    #[serde(flatten)]
+    filter: Filter,
+}
+
+impl<'de> Deserialize<'de> for Layer {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+
+        // 兼容 railpack 配置：Layer 允许使用 "..." 作为 spread 占位符
+        if let Some(s) = value.as_str() {
+            if s == "..." {
+                return Ok(Layer {
+                    spread: Some(true),
+                    ..Default::default()
+                });
+            }
+            return Err(serde::de::Error::custom(format!(
+                "无效的 Layer 字符串表示: {s}"
+            )));
+        }
+
+        if value.is_object() {
+            let raw: LayerSerde =
+                serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+            return Ok(Layer {
+                image: raw.image,
+                step: raw.step,
+                local: raw.local,
+                spread: raw.spread,
+                filter: raw.filter,
+            });
+        }
+
+        Err(serde::de::Error::custom("Layer 必须是 JSON 对象或 \"...\""))
+    }
 }
 
 impl Layer {
@@ -57,10 +108,7 @@ impl Layer {
 
     /// 检查 Layer 是否为空（无 step/image/local/spread）
     pub fn is_empty(&self) -> bool {
-        self.step.is_none()
-            && self.image.is_none()
-            && self.local.is_none()
-            && self.spread.is_none()
+        self.step.is_none() && self.image.is_none() && self.local.is_none() && self.spread.is_none()
     }
 
     /// 显示名称（用于日志）
@@ -125,7 +173,8 @@ mod tests {
 
     #[test]
     fn test_layer_json_roundtrip_step() {
-        let layer = Layer::new_step_layer("build", Some(Filter::include_only(vec![".".to_string()])));
+        let layer =
+            Layer::new_step_layer("build", Some(Filter::include_only(vec![".".to_string()])));
         let json = serde_json::to_string(&layer).unwrap();
         let parsed: Layer = serde_json::from_str(&json).unwrap();
         assert_eq!(layer, parsed);
@@ -151,8 +200,23 @@ mod tests {
 
     #[test]
     fn test_layer_display_name() {
-        assert_eq!(Layer::new_step_layer("install", None).display_name(), "step:install");
-        assert_eq!(Layer::new_image_layer("ubuntu:22.04", None).display_name(), "image:ubuntu:22.04");
+        assert_eq!(
+            Layer::new_step_layer("install", None).display_name(),
+            "step:install"
+        );
+        assert_eq!(
+            Layer::new_image_layer("ubuntu:22.04", None).display_name(),
+            "image:ubuntu:22.04"
+        );
         assert_eq!(Layer::new_local_layer().display_name(), "local");
+    }
+
+    #[test]
+    fn test_layer_deserialize_spread_string() {
+        let layer: Layer = serde_json::from_str(r#""...""#).unwrap();
+        assert_eq!(layer.spread, Some(true));
+        assert!(layer.step.is_none());
+        assert!(layer.image.is_none());
+        assert!(layer.local.is_none());
     }
 }

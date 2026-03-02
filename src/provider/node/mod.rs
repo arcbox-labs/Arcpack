@@ -1,15 +1,15 @@
-pub mod package_json;
-pub mod package_manager;
 pub mod detect;
 pub mod frameworks;
-pub mod spa;
+pub mod package_json;
+pub mod package_manager;
 pub mod prune;
+pub mod spa;
 pub mod workspace;
 
 use std::collections::HashMap;
 
-use crate::app::App;
 use crate::app::environment::Environment;
+use crate::app::App;
 use crate::generate::command_step_builder::CommandStepBuilder;
 use crate::generate::mise_step_builder::{self, MiseStepBuilder};
 use crate::generate::GenerateContext;
@@ -31,15 +31,46 @@ const NODE_MODULES_CACHE: &str = "/app/node_modules/.cache";
 
 /// Puppeteer/Chromium 所需的 APT 包列表
 const PUPPETEER_APT_PACKAGES: &[&str] = &[
-    "xvfb", "gconf-service", "libasound2", "libatk1.0-0", "libc6",
-    "libcairo2", "libcups2", "libdbus-1-3", "libexpat1", "libfontconfig1",
-    "libgbm1", "libgcc1", "libgconf-2-4", "libgdk-pixbuf2.0-0",
-    "libglib2.0-0", "libgtk-3-0", "libnspr4", "libpango-1.0-0",
-    "libpangocairo-1.0-0", "libstdc++6", "libx11-6", "libx11-xcb1",
-    "libxcb1", "libxcomposite1", "libxcursor1", "libxdamage1", "libxext6",
-    "libxfixes3", "libxi6", "libxrandr2", "libxrender1", "libxss1",
-    "libxtst6", "ca-certificates", "fonts-liberation", "libappindicator1",
-    "libnss3", "lsb-release", "xdg-utils", "wget",
+    "xvfb",
+    "gconf-service",
+    "libasound2",
+    "libatk1.0-0",
+    "libc6",
+    "libcairo2",
+    "libcups2",
+    "libdbus-1-3",
+    "libexpat1",
+    "libfontconfig1",
+    "libgbm1",
+    "libgcc1",
+    "libgconf-2-4",
+    "libgdk-pixbuf2.0-0",
+    "libglib2.0-0",
+    "libgtk-3-0",
+    "libnspr4",
+    "libpango-1.0-0",
+    "libpangocairo-1.0-0",
+    "libstdc++6",
+    "libx11-6",
+    "libx11-xcb1",
+    "libxcb1",
+    "libxcomposite1",
+    "libxcursor1",
+    "libxdamage1",
+    "libxext6",
+    "libxfixes3",
+    "libxi6",
+    "libxrandr2",
+    "libxrender1",
+    "libxss1",
+    "libxtst6",
+    "ca-certificates",
+    "fonts-liberation",
+    "libappindicator1",
+    "libnss3",
+    "lsb-release",
+    "xdg-utils",
+    "wget",
 ];
 
 /// Node.js Provider
@@ -83,8 +114,7 @@ impl NodeProvider {
             return true;
         }
         self.package_json.as_ref().map_or(false, |pkg| {
-            pkg.package_manager.is_some()
-                || pkg.scripts.values().any(|s| s.contains("node"))
+            pkg.package_manager.is_some() || pkg.scripts.values().any(|s| s.contains("node"))
         })
     }
 
@@ -124,7 +154,10 @@ impl NodeProvider {
         let mut env_vars = HashMap::from([
             ("NODE_ENV".to_string(), "production".to_string()),
             ("NPM_CONFIG_PRODUCTION".to_string(), "false".to_string()),
-            ("NPM_CONFIG_UPDATE_NOTIFIER".to_string(), "false".to_string()),
+            (
+                "NPM_CONFIG_UPDATE_NOTIFIER".to_string(),
+                "false".to_string(),
+            ),
             ("NPM_CONFIG_FUND".to_string(), "false".to_string()),
             ("CI".to_string(), "true".to_string()),
         ]);
@@ -155,7 +188,10 @@ impl NodeProvider {
 
     /// 获取 Puppeteer APT 包列表
     fn get_puppeteer_apt_packages() -> Vec<String> {
-        PUPPETEER_APT_PACKAGES.iter().map(|s| s.to_string()).collect()
+        PUPPETEER_APT_PACKAGES
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
     }
 
     /// 确保 mise_step_builder 已初始化
@@ -236,9 +272,7 @@ impl NodeProvider {
                     mise.default_package(&mut ctx.resolver, "node", DEFAULT_NODE_VERSION)
                 };
 
-                if let (Some(env_version), var_name) =
-                    ctx.env.get_config_variable("NODE_VERSION")
-                {
+                if let (Some(env_version), var_name) = ctx.env.get_config_variable("NODE_VERSION") {
                     let mise = ctx.mise_step_builder.as_mut().unwrap();
                     mise.version(&mut ctx.resolver, &node_ref, &env_version, &var_name);
                 }
@@ -249,8 +283,12 @@ impl NodeProvider {
 
         if let Some(ref pkg) = self.package_json {
             let mise = ctx.mise_step_builder.as_mut().unwrap();
-            self.package_manager
-                .get_package_manager_packages(&ctx.app, pkg, mise, &mut ctx.resolver);
+            self.package_manager.get_package_manager_packages(
+                &ctx.app,
+                pkg,
+                mise,
+                &mut ctx.resolver,
+            );
         }
 
         if uses_corepack {
@@ -297,7 +335,10 @@ impl NodeProvider {
                 ));
             }
 
-            step.add_command(Command::new_exec(format!("mkdir -p {}", NODE_MODULES_CACHE)));
+            step.add_command(Command::new_exec(format!(
+                "mkdir -p {}",
+                NODE_MODULES_CACHE
+            )));
         }
 
         {
@@ -389,8 +430,10 @@ impl Provider for NodeProvider {
         }
 
         // 设置元数据
-        ctx.metadata.set("nodePackageManager", &self.package_manager.to_string());
-        ctx.metadata.set_bool("nodeUsesCorepack", self.uses_corepack());
+        ctx.metadata
+            .set("nodePackageManager", &self.package_manager.to_string());
+        ctx.metadata
+            .set_bool("nodeUsesCorepack", self.uses_corepack());
 
         let uses_corepack = self.uses_corepack();
 
@@ -409,6 +452,14 @@ impl Provider for NodeProvider {
 
         self.install_node_deps(ctx, "install")?;
 
+        // === Prune 步骤（可选）===
+        // 对齐 railpack：prune 以 install 为输入，并位于 build 之前。
+        let prune_step_name = prune::create_prune_step(ctx, &self.package_manager, "install");
+        let has_prune = prune_step_name.is_some();
+        if has_prune {
+            ctx.metadata.set_bool("nodePruneDeps", true);
+        }
+
         // === build 步骤 ===
         let build = ctx.new_command_step("build");
         build.add_input(Layer::new_step_layer("install", None));
@@ -426,7 +477,10 @@ impl Provider for NodeProvider {
             .or_else(|| {
                 self.workspace_packages.iter().find_map(|ws_pkg| {
                     frameworks::detect_frameworks(
-                        &ctx.app, &ctx.env, &ws_pkg.package_json, &ws_pkg.path,
+                        &ctx.app,
+                        &ctx.env,
+                        &ws_pkg.package_json,
+                        &ws_pkg.path,
                     )
                     .first()
                     .cloned()
@@ -435,15 +489,20 @@ impl Provider for NodeProvider {
 
         if let Some(ref fw) = primary_framework {
             ctx.metadata.set("nodeFramework", &fw.name);
-            ctx.metadata.set("nodeDeployMode", match fw.mode {
-                frameworks::DeployMode::Ssr => "ssr",
-                frameworks::DeployMode::Spa => "spa",
-            });
+            ctx.metadata.set(
+                "nodeDeployMode",
+                match fw.mode {
+                    frameworks::DeployMode::Ssr => "ssr",
+                    frameworks::DeployMode::Spa => "spa",
+                },
+            );
 
             // 框架特定缓存目录
             for cache_dir in &fw.cache_dirs {
-                let cache_name = cache_dir.trim_start_matches("/app/")
-                    .replace('/', "-").replace('.', "");
+                let cache_name = cache_dir
+                    .trim_start_matches("/app/")
+                    .replace('/', "-")
+                    .replace('.', "");
                 ctx.caches.add_cache(&cache_name, cache_dir);
                 let build = Self::get_command_step(&mut ctx.steps, "build");
                 build.add_cache(&cache_name);
@@ -453,23 +512,21 @@ impl Provider for NodeProvider {
         // === Workspace 元数据 ===
         if !self.workspace_packages.is_empty() {
             ctx.metadata.set_bool("nodeWorkspace", true);
-            let pkg_names: Vec<&str> = self.workspace_packages.iter()
-                .map(|p| p.path.as_str()).collect();
-            ctx.metadata.set("nodeWorkspacePackages", &pkg_names.join(","));
-        }
-
-        // === Prune 步骤（可选） ===
-        let prune_step_name = prune::create_prune_step(ctx, &self.package_manager, "build");
-        let has_prune = prune_step_name.is_some();
-        if has_prune {
-            ctx.metadata.set_bool("nodePruneDeps", true);
+            let pkg_names: Vec<&str> = self
+                .workspace_packages
+                .iter()
+                .map(|p| p.path.as_str())
+                .collect();
+            ctx.metadata
+                .set("nodeWorkspacePackages", &pkg_names.join(","));
         }
 
         // node_modules 层的来源步骤
         let node_modules_source_step = if has_prune { "prune" } else { "build" };
 
         // === Deploy 配置 ===
-        let is_spa = primary_framework.as_ref()
+        let is_spa = primary_framework
+            .as_ref()
             .map(|fw| fw.mode == frameworks::DeployMode::Spa)
             .unwrap_or(false);
 
@@ -534,8 +591,10 @@ impl Provider for NodeProvider {
         // Puppeteer 检测 → 添加 Chromium APT 依赖
         if let Some(ref pkg) = self.package_json {
             if Self::has_puppeteer(pkg) {
-                ctx.deploy.add_apt_packages(&Self::get_puppeteer_apt_packages());
-                ctx.logs.info("detected Puppeteer dependency, adding Chromium APT packages");
+                ctx.deploy
+                    .add_apt_packages(&Self::get_puppeteer_apt_packages());
+                ctx.logs
+                    .info("detected Puppeteer dependency, adding Chromium APT packages");
             }
         }
 
@@ -550,7 +609,10 @@ impl Provider for NodeProvider {
     }
 
     fn cleanse_plan(&self, plan: &mut crate::plan::BuildPlan) {
-        let has_prune = plan.steps.iter().any(|s| s.name.as_deref() == Some("prune"));
+        let has_prune = plan
+            .steps
+            .iter()
+            .any(|s| s.name.as_deref() == Some("prune"));
         prune::cleanse_plan_for_prune(plan, has_prune);
     }
 
@@ -687,11 +749,7 @@ mod tests {
             "scripts": { "start": "node index.js" }
         }"#,
         );
-        fs::write(
-            dir.path().join("pnpm-lock.yaml"),
-            "lockfileVersion: '9.0'",
-        )
-        .unwrap();
+        fs::write(dir.path().join("pnpm-lock.yaml"), "lockfileVersion: '9.0'").unwrap();
 
         let mut ctx = make_ctx(&dir);
         let mut provider = NodeProvider::new();

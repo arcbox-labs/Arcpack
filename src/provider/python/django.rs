@@ -1,14 +1,12 @@
+use crate::app::environment::Environment;
 /// Django 检测和 WSGI 模块解析
 ///
 /// 对齐 railpack `core/providers/python/django.go`
-
 use crate::app::App;
-use crate::app::environment::Environment;
 
 /// 检测是否为 Django 项目
 pub fn is_django(app: &App, dependencies: &[String]) -> bool {
-    app.has_file("manage.py")
-        && dependencies.iter().any(|d| d == "django" || d == "Django")
+    app.has_file("manage.py") && dependencies.iter().any(|d| d == "django" || d == "Django")
 }
 
 /// 解析 Django WSGI 模块名

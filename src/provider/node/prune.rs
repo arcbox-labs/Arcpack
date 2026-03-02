@@ -1,20 +1,18 @@
+use super::package_manager::PackageManagerKind;
 /// 依赖裁剪模块
 ///
 /// 对齐 railpack `core/providers/node/prune.go`
 /// 通过 ARCPACK_PRUNE_DEPS=true 触发，构建后删除 devDependencies 以减小镜像体积。
+use std::collections::HashMap;
 
 use crate::app::environment::Environment;
 use crate::generate::GenerateContext;
 use crate::plan::{BuildPlan, Command, Layer};
-use super::package_manager::PackageManagerKind;
 
 /// 获取裁剪命令
 ///
 /// 各包管理器有不同的裁剪方式
-pub fn get_prune_command(
-    pm: &PackageManagerKind,
-    env: &Environment,
-) -> Option<String> {
+pub fn get_prune_command(pm: &PackageManagerKind, env: &Environment) -> Option<String> {
     // 用户自定义裁剪命令优先
     if let (Some(custom_cmd), _) = env.get_config_variable("NODE_PRUNE_CMD") {
         if !custom_cmd.is_empty() {
@@ -34,9 +32,7 @@ pub fn get_prune_command(
             "rm -rf node_modules && bun install --production --ignore-scripts".to_string()
         }
         PackageManagerKind::Yarn1 => "yarn install --production=true".to_string(),
-        PackageManagerKind::YarnBerry => {
-            "yarn workspaces focus --production --all".to_string()
-        }
+        PackageManagerKind::YarnBerry => "yarn workspaces focus --production --all".to_string(),
     };
 
     Some(cmd)
@@ -48,13 +44,31 @@ pub fn get_prune_command(
 pub fn create_prune_step(
     ctx: &mut GenerateContext,
     pm: &PackageManagerKind,
-    build_step_name: &str,
+    input_step_name: &str,
 ) -> Option<String> {
     let prune_cmd = get_prune_command(pm, &ctx.env)?;
+    let install_cache = pm.get_install_cache(&mut ctx.caches);
 
     let prune_step = ctx.new_command_step("prune");
-    prune_step.add_input(Layer::new_step_layer(build_step_name, None));
-    prune_step.add_command(Command::new_exec_shell(&prune_cmd));
+    prune_step.add_input(Layer::new_step_layer(input_step_name, None));
+
+    // 对齐 railpack：prune 复用包管理器安装缓存（如 npm-install）。
+    prune_step.add_cache(&install_cache);
+    // prune 不应默认继承 `*` secrets。
+    prune_step.secrets.clear();
+    // 对齐 railpack：npm prune 时显式开启 production 模式。
+    if *pm == PackageManagerKind::Npm {
+        prune_step.add_variables(&HashMap::from([(
+            "NPM_CONFIG_PRODUCTION".to_string(),
+            "true".to_string(),
+        )]));
+    }
+
+    if prune_cmd.contains("&&") || prune_cmd.contains("||") || prune_cmd.contains(';') {
+        prune_step.add_command(Command::new_exec_shell(&prune_cmd));
+    } else {
+        prune_step.add_command(Command::new_exec(prune_cmd));
+    }
 
     Some("prune".to_string())
 }
@@ -148,7 +162,11 @@ mod tests {
         plan.add_step(step);
 
         cleanse_plan_for_prune(&mut plan, true);
-        let install = plan.steps.iter().find(|s| s.name.as_deref() == Some("install")).unwrap();
+        let install = plan
+            .steps
+            .iter()
+            .find(|s| s.name.as_deref() == Some("install"))
+            .unwrap();
         assert!(!install.caches.contains(&"node-modules".to_string()));
         assert!(install.caches.contains(&"apt-cache".to_string()));
     }
@@ -162,7 +180,11 @@ mod tests {
         plan.add_step(step);
 
         cleanse_plan_for_prune(&mut plan, false);
-        let install = plan.steps.iter().find(|s| s.name.as_deref() == Some("install")).unwrap();
+        let install = plan
+            .steps
+            .iter()
+            .find(|s| s.name.as_deref() == Some("install"))
+            .unwrap();
         assert!(install.caches.contains(&"node-modules".to_string()));
     }
 }

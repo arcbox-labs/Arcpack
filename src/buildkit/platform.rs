@@ -114,10 +114,7 @@ mod tests {
     fn test_parse_platform_defaults_not_empty() {
         let p = parse_platform_with_defaults("").unwrap();
         assert_eq!(p.os, "linux", "默认 os 应为 linux");
-        assert!(
-            !p.arch.is_empty(),
-            "默认 arch 不应为空"
-        );
+        assert!(!p.arch.is_empty(), "默认 arch 不应为空");
     }
 
     #[test]

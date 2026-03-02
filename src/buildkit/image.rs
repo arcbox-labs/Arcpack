@@ -50,7 +50,10 @@ pub fn build_image_config(
     let mut path_parts: Vec<String> = Vec::new();
     push_unique(&mut path_parts, deploy.paths.iter().cloned());
     push_unique(&mut path_parts, graph_env.path_list.iter().cloned());
-    push_unique(&mut path_parts, DEFAULT_SYSTEM_PATH.split(':').map(String::from));
+    push_unique(
+        &mut path_parts,
+        DEFAULT_SYSTEM_PATH.split(':').map(String::from),
+    );
 
     if !path_parts.is_empty() {
         env.push(format!("PATH={}", path_parts.join(":")));
@@ -126,7 +129,11 @@ mod tests {
         let path_value = path_entry.strip_prefix("PATH=").unwrap();
         let parts: Vec<&str> = path_value.split(':').collect();
         let custom_count = parts.iter().filter(|&&p| p == "/custom/bin").count();
-        assert_eq!(custom_count, 1, "/custom/bin 不应重复，实际出现 {} 次", custom_count);
+        assert_eq!(
+            custom_count, 1,
+            "/custom/bin 不应重复，实际出现 {} 次",
+            custom_count
+        );
 
         // /usr/local/bin 不应重复出现
         let usr_local_count = parts.iter().filter(|&&p| p == "/usr/local/bin").count();
@@ -175,7 +182,11 @@ mod tests {
         };
 
         let config = build_image_config(&graph_env, &deploy, &test_platform());
-        assert_eq!(config.cmd, vec!["/bin/bash"], "无 start_cmd 时应默认 /bin/bash");
+        assert_eq!(
+            config.cmd,
+            vec!["/bin/bash"],
+            "无 start_cmd 时应默认 /bin/bash"
+        );
     }
 
     #[test]

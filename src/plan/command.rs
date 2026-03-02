@@ -131,6 +131,22 @@ impl<'de> Deserialize<'de> for Command {
     {
         let value = serde_json::Value::deserialize(deserializer)?;
 
+        // 兼容 railpack 配置：commands 允许直接使用字符串
+        // - "..." 保留为 spread 占位符
+        // - 其他字符串视为 shell 命令（对齐 railpack NewExecShellCommand 语义）
+        if let Some(cmd) = value.as_str() {
+            if cmd == "..." {
+                return Ok(Command::Exec(ExecCommand {
+                    cmd: cmd.to_string(),
+                    custom_name: None,
+                }));
+            }
+            return Ok(Command::Exec(ExecCommand {
+                cmd: format!("sh -c '{}'", cmd),
+                custom_name: Some(cmd.to_string()),
+            }));
+        }
+
         let obj = value
             .as_object()
             .ok_or_else(|| serde::de::Error::custom("Command 必须是 JSON 对象"))?;
@@ -288,5 +304,23 @@ mod tests {
     fn test_invalid_command_json_returns_error() {
         let result: std::result::Result<Command, _> = serde_json::from_str(r#"{"foo": "bar"}"#);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_deserialize_command_from_string() {
+        let cmd: Command = serde_json::from_str(r#""npm ci""#).unwrap();
+        assert_eq!(
+            cmd,
+            Command::Exec(ExecCommand {
+                cmd: "sh -c 'npm ci'".to_string(),
+                custom_name: Some("npm ci".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn test_deserialize_spread_command_from_string() {
+        let cmd: Command = serde_json::from_str(r#""...""#).unwrap();
+        assert!(cmd.is_spread());
     }
 }

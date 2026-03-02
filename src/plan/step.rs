@@ -48,10 +48,10 @@ impl Step {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::command::Command;
     use super::super::filter::Filter;
     use super::super::layer::Layer;
+    use super::*;
 
     #[test]
     fn test_step_new_defaults_secrets_to_wildcard() {
@@ -76,8 +76,10 @@ mod tests {
         step.inputs.push(Layer::new_step_layer("install", None));
         step.inputs.push(Layer::new_local_layer());
         step.commands.push(Command::new_exec("go build -o app ."));
-        step.assets.insert("config.toml".to_string(), "[settings]".to_string());
-        step.variables.insert("GOFLAGS".to_string(), "-trimpath".to_string());
+        step.assets
+            .insert("config.toml".to_string(), "[settings]".to_string());
+        step.variables
+            .insert("GOFLAGS".to_string(), "-trimpath".to_string());
         step.caches.push("go-build".to_string());
 
         let json = serde_json::to_string_pretty(&step).unwrap();

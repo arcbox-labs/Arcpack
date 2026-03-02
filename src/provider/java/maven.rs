@@ -1,12 +1,11 @@
 /// Maven 构建路径
 ///
 /// 对齐 railpack `core/providers/java/maven.go`
-
 use crate::app::App;
 use crate::generate::command_step_builder::CommandStepBuilder;
+use crate::generate::mise_step_builder::MiseStepBuilder;
 use crate::plan::Command;
 use crate::resolver::Resolver;
-use crate::generate::mise_step_builder::MiseStepBuilder;
 
 /// 检测是否有 Maven wrapper
 pub fn has_maven_wrapper(app: &App) -> bool {
@@ -23,10 +22,7 @@ pub fn get_maven_command(app: &App) -> &'static str {
 }
 
 /// 配置 Maven 构建 mise 包
-pub fn setup_maven_packages(
-    mise: &mut MiseStepBuilder,
-    resolver: &mut Resolver,
-) {
+pub fn setup_maven_packages(mise: &mut MiseStepBuilder, resolver: &mut Resolver) {
     let maven_ref = mise.default_package(resolver, "maven", "latest");
     let _ = maven_ref;
 }
@@ -88,11 +84,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("mvnw"), "#!/bin/bash").unwrap();
         fs::create_dir_all(dir.path().join(".mvn/wrapper")).unwrap();
-        fs::write(
-            dir.path().join(".mvn/wrapper/maven-wrapper.properties"),
-            "",
-        )
-        .unwrap();
+        fs::write(dir.path().join(".mvn/wrapper/maven-wrapper.properties"), "").unwrap();
         let app = App::new(dir.path().to_str().unwrap()).unwrap();
         assert_eq!(get_maven_command(&app), "./mvnw");
     }

@@ -2,11 +2,10 @@
 ///
 /// 对齐 railpack `core/providers/gleam/gleam.go`
 /// 构建期用 gleam + erlang，运行时仅需 erlang。
-
 use serde::Deserialize;
 
-use crate::app::App;
 use crate::app::environment::Environment;
+use crate::app::App;
 use crate::generate::command_step_builder::CommandStepBuilder;
 use crate::generate::mise_step_builder::{self, MiseStepBuilder};
 use crate::generate::GenerateContext;
@@ -131,14 +130,9 @@ impl Provider for GleamProvider {
         }
 
         // === Deploy 配置 ===
-        let bin_name = self
-            .app_name
-            .as_deref()
-            .unwrap_or("app");
+        let bin_name = self.app_name.as_deref().unwrap_or("app");
 
-        ctx.deploy.start_cmd = Some(format!(
-            "./build/erlang-shipment/entrypoint.sh run"
-        ));
+        ctx.deploy.start_cmd = Some(format!("./build/erlang-shipment/entrypoint.sh run"));
 
         ctx.metadata.set("gleamBinName", bin_name);
 
@@ -154,9 +148,7 @@ impl Provider for GleamProvider {
             ])),
         );
 
-        let mut build_filter = Filter::include_only(vec![
-            "build/erlang-shipment".to_string(),
-        ]);
+        let mut build_filter = Filter::include_only(vec!["build/erlang-shipment".to_string()]);
 
         if self.include_source {
             // 包含完整源码

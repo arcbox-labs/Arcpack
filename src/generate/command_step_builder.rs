@@ -2,7 +2,7 @@ use std::any::Any;
 use std::collections::HashMap;
 
 use crate::app::environment::Environment;
-use crate::plan::{BuildPlan, Command, Layer, Step, spread, spread_strings};
+use crate::plan::{spread, spread_strings, BuildPlan, Command, Layer, Step};
 use crate::Result;
 
 use super::{BuildStepOptions, StepBuilder};

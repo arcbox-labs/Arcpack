@@ -3,7 +3,6 @@
 /// 对齐 railpack `core/providers/procfile/procfile.go` + `core/core.go`
 /// 特殊说明：Procfile 不在 get_all_providers() 注册表中。
 /// 它始终在主 Provider plan() 之后独立运行，仅用于覆盖 start command。
-
 use crate::generate::GenerateContext;
 use crate::Result;
 
@@ -72,8 +71,8 @@ impl ProcfileProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::App;
     use crate::app::environment::Environment;
+    use crate::app::App;
     use crate::config::Config;
     use crate::generate::GenerateContext;
     use crate::resolver::VersionResolver;
@@ -102,9 +101,13 @@ mod tests {
 
     #[test]
     fn test_parse_procfile_basic() {
-        let entries = ProcfileProvider::parse_procfile("web: node server.js\nworker: node worker.js");
+        let entries =
+            ProcfileProvider::parse_procfile("web: node server.js\nworker: node worker.js");
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0], ("web".to_string(), "node server.js".to_string()));
+        assert_eq!(
+            entries[0],
+            ("web".to_string(), "node server.js".to_string())
+        );
         assert_eq!(
             entries[1],
             ("worker".to_string(), "node worker.js".to_string())
@@ -121,7 +124,10 @@ mod tests {
     #[test]
     fn test_parse_procfile_trims_whitespace() {
         let entries = ProcfileProvider::parse_procfile("  web:  node server.js  ");
-        assert_eq!(entries[0], ("web".to_string(), "node server.js".to_string()));
+        assert_eq!(
+            entries[0],
+            ("web".to_string(), "node server.js".to_string())
+        );
     }
 
     // === 优先级测试 ===
@@ -192,10 +198,7 @@ mod tests {
         let provider = ProcfileProvider::new();
         provider.plan(&mut ctx).unwrap();
 
-        assert_eq!(
-            ctx.deploy.start_cmd.as_deref(),
-            Some("node server.js")
-        );
+        assert_eq!(ctx.deploy.start_cmd.as_deref(), Some("node server.js"));
     }
 
     #[test]
@@ -207,10 +210,7 @@ mod tests {
         let provider = ProcfileProvider::new();
         provider.plan(&mut ctx).unwrap();
 
-        assert_eq!(
-            ctx.deploy.start_cmd.as_deref(),
-            Some("node worker.js")
-        );
+        assert_eq!(ctx.deploy.start_cmd.as_deref(), Some("node worker.js"));
     }
 
     // === 不在注册表中 ===

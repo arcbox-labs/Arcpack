@@ -3,7 +3,6 @@
 /// 对齐 railpack `core/providers/php/php.go`
 /// 使用 ImageStepBuilder（基于 dunglas/frankenphp 镜像），
 /// 支持 Laravel、PHP 扩展自动检测、Caddyfile 模板。
-
 pub mod extensions;
 pub mod laravel;
 
@@ -11,13 +10,13 @@ use std::collections::HashMap;
 
 use regex::Regex;
 
-use crate::app::App;
 use crate::app::environment::Environment;
+use crate::app::App;
 use crate::generate::command_step_builder::CommandStepBuilder;
 use crate::generate::GenerateContext;
 use crate::plan::{Command, Filter, Layer};
-use crate::provider::Provider;
 use crate::provider::node::NodeProvider;
+use crate::provider::Provider;
 use crate::Result;
 
 /// 默认 PHP 版本
@@ -54,7 +53,8 @@ impl PhpProvider {
     fn parse_php_version(app: &App) -> Option<String> {
         let content = app.read_file("composer.json").ok()?;
         let json: serde_json::Value = serde_json::from_str(&content).ok()?;
-        let php_constraint = json.get("require")
+        let php_constraint = json
+            .get("require")
             .and_then(|r| r.get("php"))
             .and_then(|v| v.as_str())?;
 
@@ -140,12 +140,7 @@ impl Provider for PhpProvider {
         let php_version = self.php_version.clone();
         let image_step = ctx.new_image_step(
             "packages:php",
-            Box::new(move |_opts| {
-                format!(
-                    "dunglas/frankenphp:php{}-bookworm",
-                    php_version
-                )
-            }),
+            Box::new(move |_opts| format!("dunglas/frankenphp:php{}-bookworm", php_version)),
         );
         image_step.apt_packages = all_apt;
 
@@ -201,9 +196,7 @@ impl Provider for PhpProvider {
                 // 从 composer 镜像复制 composer 二进制
                 install.add_input(Layer::new_image_layer(
                     "composer:latest".to_string(),
-                    Some(Filter::include_only(vec![
-                        "/usr/bin/composer".to_string(),
-                    ])),
+                    Some(Filter::include_only(vec!["/usr/bin/composer".to_string()])),
                 ));
 
                 install.add_command(Command::new_exec(
@@ -212,7 +205,9 @@ impl Provider for PhpProvider {
             }
 
             // Composer 缓存（对齐 railpack：/opt/cache/composer）
-            let cache_name = ctx.caches.add_cache("composer-cache", "/opt/cache/composer");
+            let cache_name = ctx
+                .caches
+                .add_cache("composer-cache", "/opt/cache/composer");
             {
                 let install = Self::get_command_step(&mut ctx.steps, "install:composer");
                 install.add_cache(&cache_name);
@@ -300,10 +295,8 @@ impl Provider for PhpProvider {
             "prepare"
         };
 
-        let output_layer = Layer::new_step_layer(
-            last_step,
-            Some(Filter::include_only(vec![".".to_string()])),
-        );
+        let output_layer =
+            Layer::new_step_layer(last_step, Some(Filter::include_only(vec![".".to_string()])));
 
         ctx.deploy.add_inputs(&[output_layer]);
 
@@ -396,7 +389,10 @@ mod tests {
         )
         .unwrap();
         let app = App::new(dir.path().to_str().unwrap()).unwrap();
-        assert_eq!(PhpProvider::parse_php_version(&app), Some("8.2".to_string()));
+        assert_eq!(
+            PhpProvider::parse_php_version(&app),
+            Some("8.2".to_string())
+        );
     }
 
     #[test]
@@ -408,7 +404,10 @@ mod tests {
         )
         .unwrap();
         let app = App::new(dir.path().to_str().unwrap()).unwrap();
-        assert_eq!(PhpProvider::parse_php_version(&app), Some("8.1".to_string()));
+        assert_eq!(
+            PhpProvider::parse_php_version(&app),
+            Some("8.1".to_string())
+        );
     }
 
     #[test]
@@ -464,10 +463,7 @@ mod tests {
         assert!(step_names.contains(&"packages:php"));
         assert!(step_names.contains(&"prepare"));
 
-        assert_eq!(
-            ctx.deploy.start_cmd.as_deref(),
-            Some("/start-container.sh")
-        );
+        assert_eq!(ctx.deploy.start_cmd.as_deref(), Some("/start-container.sh"));
     }
 
     #[test]

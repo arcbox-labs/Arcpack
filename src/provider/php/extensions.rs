@@ -1,10 +1,9 @@
+use crate::app::environment::Environment;
 /// PHP 扩展检测与安装
 ///
 /// 对齐 railpack `core/providers/php/php.go` 扩展安装部分
 /// 解析 composer.json、环境变量、Laravel 必需扩展。
-
 use crate::app::App;
-use crate::app::environment::Environment;
 
 /// Laravel 必需扩展
 const LARAVEL_REQUIRED_EXTENSIONS: &[&str] = &[
@@ -24,11 +23,7 @@ const LARAVEL_REQUIRED_EXTENSIONS: &[&str] = &[
 ];
 
 /// 检测所有需要安装的 PHP 扩展
-pub fn detect_extensions(
-    app: &App,
-    env: &Environment,
-    is_laravel: bool,
-) -> Vec<String> {
+pub fn detect_extensions(app: &App, env: &Environment, is_laravel: bool) -> Vec<String> {
     let mut extensions = Vec::new();
 
     // 1. 从 composer.json require 中的 ext-* 键
@@ -90,9 +85,15 @@ pub fn detect_extensions(
     // 5. Redis 扩展（环境变量 + composer.json require 中的 redis/predis 包）
     let mut needs_redis = env.get_variable("REDIS_HOST").is_some()
         || env.get_variable("REDIS_URL").is_some()
-        || env.get_variable("CACHE_DRIVER").map_or(false, |v| v == "redis")
-        || env.get_variable("SESSION_DRIVER").map_or(false, |v| v == "redis")
-        || env.get_variable("QUEUE_CONNECTION").map_or(false, |v| v == "redis");
+        || env
+            .get_variable("CACHE_DRIVER")
+            .map_or(false, |v| v == "redis")
+        || env
+            .get_variable("SESSION_DRIVER")
+            .map_or(false, |v| v == "redis")
+        || env
+            .get_variable("QUEUE_CONNECTION")
+            .map_or(false, |v| v == "redis");
 
     // 扫描 composer.json 中的 redis/predis 包依赖
     if !needs_redis {
@@ -127,10 +128,7 @@ pub fn install_command(extensions: &[String]) -> Option<String> {
     if extensions.is_empty() {
         return None;
     }
-    Some(format!(
-        "install-php-extensions {}",
-        extensions.join(" ")
-    ))
+    Some(format!("install-php-extensions {}", extensions.join(" ")))
 }
 
 #[cfg(test)]

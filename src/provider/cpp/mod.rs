@@ -1,10 +1,9 @@
+use crate::app::environment::Environment;
 /// C++ Provider：CMake/Meson 构建系统检测
 ///
 /// 对齐 railpack `core/providers/cpp/cpp.go`, `cmake.go`, `meson.go`
 /// 支持 CMake + Ninja 和 Meson + Ninja 双路径。
-
 use crate::app::App;
-use crate::app::environment::Environment;
 use crate::generate::command_step_builder::CommandStepBuilder;
 use crate::generate::mise_step_builder::{self, MiseStepBuilder};
 use crate::generate::GenerateContext;
@@ -126,9 +125,7 @@ impl Provider for CppProvider {
 
             match self.build_system {
                 BuildSystem::CMake => {
-                    build.add_command(Command::new_exec(
-                        "cmake -B /build -GNinja /app",
-                    ));
+                    build.add_command(Command::new_exec("cmake -B /build -GNinja /app"));
                     build.add_command(Command::new_exec("cmake --build /build"));
                 }
                 BuildSystem::Meson => {
@@ -203,7 +200,11 @@ mod tests {
     #[test]
     fn test_detect_cmake() {
         let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("CMakeLists.txt"), "cmake_minimum_required(VERSION 3.20)").unwrap();
+        fs::write(
+            dir.path().join("CMakeLists.txt"),
+            "cmake_minimum_required(VERSION 3.20)",
+        )
+        .unwrap();
         let app = App::new(dir.path().to_str().unwrap()).unwrap();
         let env = Environment::new(HashMap::new());
         let provider = CppProvider::new();
@@ -275,7 +276,12 @@ mod tests {
         assert_eq!(ctx.metadata.get("cppBuildSystem"), Some("cmake"));
 
         // start_cmd 包含 /build/
-        assert!(ctx.deploy.start_cmd.as_deref().unwrap().starts_with("/build/"));
+        assert!(ctx
+            .deploy
+            .start_cmd
+            .as_deref()
+            .unwrap()
+            .starts_with("/build/"));
     }
 
     #[test]

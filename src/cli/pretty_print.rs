@@ -1,7 +1,6 @@
 /// 终端美化输出模块
 ///
 /// 对齐 railpack `core/prettyPrint.go`
-
 use std::io::Write;
 
 use owo_colors::OwoColorize;
@@ -76,14 +75,8 @@ pub fn format_build_result(result: &BuildResult, options: &PrintOptions) -> Stri
         let mut packages: Vec<_> = result.resolved_packages.iter().collect();
         packages.sort_by(|a, b| a.0.cmp(b.0));
         for (_, pkg) in &packages {
-            let version_str = pkg
-                .resolved_version
-                .as_deref()
-                .unwrap_or("unknown");
-            let requested = pkg
-                .requested_version
-                .as_deref()
-                .unwrap_or("");
+            let version_str = pkg.resolved_version.as_deref().unwrap_or("unknown");
+            let requested = pkg.requested_version.as_deref().unwrap_or("");
             out.push_str(&format!(
                 "  {} {} {} ({})\n",
                 pkg.name.if_supports_color(s, |t| t.green()),
@@ -106,10 +99,7 @@ pub fn format_build_result(result: &BuildResult, options: &PrintOptions) -> Stri
                 "Steps".if_supports_color(s, |t| t.bold()),
             ));
             for (i, step) in plan.steps.iter().enumerate() {
-                let name = step
-                    .name
-                    .as_deref()
-                    .unwrap_or("unnamed");
+                let name = step.name.as_deref().unwrap_or("unnamed");
                 out.push_str(&format!(
                     "  {}. {}\n",
                     (i + 1).if_supports_color(s, |t| t.dimmed()),
@@ -158,10 +148,10 @@ pub fn pretty_print_build_result(result: &BuildResult, options: &PrintOptions) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use crate::plan::BuildPlan;
     use crate::plan::Step;
     use crate::resolver::ResolvedPackage;
+    use std::collections::HashMap;
 
     fn make_basic_result() -> BuildResult {
         BuildResult {

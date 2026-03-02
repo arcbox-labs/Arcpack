@@ -2,19 +2,18 @@
 ///
 /// 对齐 railpack `core/providers/ruby/ruby.go`
 /// 支持 Ruby 版本解析、Bundler 版本、Rails 资产编译、gem 依赖 APT 包。
-
 use std::collections::HashMap;
 
 use regex::Regex;
 
-use crate::app::App;
 use crate::app::environment::Environment;
+use crate::app::App;
 use crate::generate::command_step_builder::CommandStepBuilder;
 use crate::generate::mise_step_builder::{self, MiseStepBuilder};
 use crate::generate::GenerateContext;
 use crate::plan::{Command, Filter, Layer};
-use crate::provider::Provider;
 use crate::provider::node::NodeProvider;
+use crate::provider::Provider;
 use crate::Result;
 
 /// 默认 Ruby 版本
@@ -29,7 +28,10 @@ const GEM_BUILD_APT_DEPS: &[(&str, &[&str])] = &[
     ("rmagick", &["libmagickwand-dev"]),
     ("ruby-vips", &["libvips-dev"]),
     ("vips", &["libvips-dev"]),
-    ("charlock_holmes", &["libicu-dev", "libxml2-dev", "libxslt-dev"]),
+    (
+        "charlock_holmes",
+        &["libicu-dev", "libxml2-dev", "libxslt-dev"],
+    ),
     ("nokogiri", &["libxml2-dev", "libxslt-dev"]),
     ("sqlite3", &["libsqlite3-dev"]),
 ];
@@ -135,7 +137,10 @@ impl RubyProvider {
     /// 解析 Gemfile 中的 path: 引用（本地 gem 路径）
     fn parse_local_gem_paths(content: &str) -> Vec<String> {
         let mut paths = Vec::new();
-        let re = Regex::new(r#"(?:gem\s+['"][^'"]+['"]\s*,.*path:\s*['"]([^'"]+)['"]|path\s+['"]([^'"]+)['"])"#).unwrap();
+        let re = Regex::new(
+            r#"(?:gem\s+['"][^'"]+['"]\s*,.*path:\s*['"]([^'"]+)['"]|path\s+['"]([^'"]+)['"])"#,
+        )
+        .unwrap();
         for caps in re.captures_iter(content) {
             if let Some(m) = caps.get(1).or(caps.get(2)) {
                 let path = m.as_str().to_string();
@@ -258,9 +263,10 @@ impl Provider for RubyProvider {
 
         // 资产管道检测
         if self.is_rails {
-            self.has_asset_pipeline = self.gems.iter().any(|g| {
-                g == "sprockets" || g == "sprockets-rails" || g == "propshaft"
-            });
+            self.has_asset_pipeline = self
+                .gems
+                .iter()
+                .any(|g| g == "sprockets" || g == "sprockets-rails" || g == "propshaft");
             self.has_bootsnap = self.gems.iter().any(|g| g == "bootsnap");
         }
 
@@ -271,7 +277,8 @@ impl Provider for RubyProvider {
         // 元数据
         ctx.metadata.set("rubyVersion", &self.ruby_version);
         ctx.metadata.set_bool("rubyRails", self.is_rails);
-        ctx.metadata.set_bool("rubyAssetPipeline", self.has_asset_pipeline);
+        ctx.metadata
+            .set_bool("rubyAssetPipeline", self.has_asset_pipeline);
         ctx.metadata.set_bool("rubyBootsnap", self.has_bootsnap);
 
         // === mise 步骤：安装 Ruby ===
@@ -371,7 +378,9 @@ impl Provider for RubyProvider {
         }
 
         // gem 缓存
-        let cache_name = ctx.caches.add_cache("bundle-cache", "/usr/local/bundle/cache");
+        let cache_name = ctx
+            .caches
+            .add_cache("bundle-cache", "/usr/local/bundle/cache");
         {
             let install = Self::get_command_step(&mut ctx.steps, "install");
             install.add_cache(&cache_name);
@@ -393,9 +402,7 @@ impl Provider for RubyProvider {
             if self.is_rails {
                 // 资产编译
                 if self.has_asset_pipeline {
-                    build.add_command(Command::new_exec(
-                        "bundle exec rake assets:precompile",
-                    ));
+                    build.add_command(Command::new_exec("bundle exec rake assets:precompile"));
                 }
                 // bootsnap 预编译
                 if self.has_bootsnap {
@@ -446,22 +453,10 @@ impl Provider for RubyProvider {
             ("GEM_HOME".to_string(), "/usr/local/bundle".to_string()),
             ("GEM_PATH".to_string(), "/usr/local/bundle".to_string()),
             ("MALLOC_ARENA_MAX".to_string(), "2".to_string()),
-            (
-                "LD_PRELOAD".to_string(),
-                "libjemalloc.so.2".to_string(),
-            ),
-            (
-                "RAILS_ENV".to_string(),
-                "production".to_string(),
-            ),
-            (
-                "RAILS_LOG_TO_STDOUT".to_string(),
-                "enabled".to_string(),
-            ),
-            (
-                "RAILS_SERVE_STATIC_FILES".to_string(),
-                "true".to_string(),
-            ),
+            ("LD_PRELOAD".to_string(), "libjemalloc.so.2".to_string()),
+            ("RAILS_ENV".to_string(), "production".to_string()),
+            ("RAILS_LOG_TO_STDOUT".to_string(), "enabled".to_string()),
+            ("RAILS_SERVE_STATIC_FILES".to_string(), "true".to_string()),
         ]);
         for (k, v) in deploy_vars {
             ctx.deploy.variables.insert(k, v);
@@ -481,7 +476,11 @@ impl Provider for RubyProvider {
             .map(|m| m.get_layer())
             .unwrap_or_default();
 
-        let build_step_name = if has_package_json { "prune:node" } else { "build" };
+        let build_step_name = if has_package_json {
+            "prune:node"
+        } else {
+            "build"
+        };
         let build_layer = Layer::new_step_layer(
             build_step_name,
             Some(Filter::include_only(vec![".".to_string()])),
@@ -702,7 +701,10 @@ BUNDLED WITH
 
         // 运行时 APT（pg → libpq5）
         assert!(ctx.deploy.apt_packages.contains(&"libpq5".to_string()));
-        assert!(ctx.deploy.apt_packages.contains(&"libjemalloc2".to_string()));
+        assert!(ctx
+            .deploy
+            .apt_packages
+            .contains(&"libjemalloc2".to_string()));
     }
 
     #[test]
@@ -727,7 +729,12 @@ BUNDLED WITH
         assert!(provider.has_bootsnap);
 
         provider.plan(&mut ctx).unwrap();
-        assert!(ctx.deploy.start_cmd.as_deref().unwrap().contains("bin/rails server"));
+        assert!(ctx
+            .deploy
+            .start_cmd
+            .as_deref()
+            .unwrap()
+            .contains("bin/rails server"));
     }
 
     #[test]

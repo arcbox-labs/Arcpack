@@ -1,7 +1,6 @@
 /// Python 包管理器检测和安装逻辑
 ///
 /// 对齐 railpack `core/providers/python/python.go` 中的包管理器部分
-
 use crate::app::App;
 use crate::generate::command_step_builder::CommandStepBuilder;
 use crate::generate::mise_step_builder::MiseStepBuilder;
@@ -94,12 +93,8 @@ pub fn add_install_commands(
 ) {
     match pm {
         PythonPackageManager::Pip => {
-            install.add_command(Command::new_exec(
-                "python -m venv /app/.venv",
-            ));
-            install.add_command(Command::new_exec(
-                "pip install -r requirements.txt",
-            ));
+            install.add_command(Command::new_exec("python -m venv /app/.venv"));
+            install.add_command(Command::new_exec("pip install -r requirements.txt"));
             let cache_name = caches.add_cache("pip", "/opt/pip-cache");
             install.add_cache(&cache_name);
         }
@@ -128,9 +123,7 @@ pub fn add_install_commands(
                     "pipenv install --deploy --ignore-pipfile",
                 ));
             } else {
-                install.add_command(Command::new_exec(
-                    "pipenv install --skip-lock",
-                ));
+                install.add_command(Command::new_exec("pipenv install --skip-lock"));
             }
         }
     }

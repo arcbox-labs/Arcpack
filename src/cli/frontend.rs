@@ -11,7 +11,6 @@
 /// 5. 通过 Return RPC 将 LLB + ImageConfig 返回给 buildkitd
 ///
 /// 对齐 railpack `cmd/cli/frontend.go`
-
 use std::collections::HashMap;
 
 use tonic::transport::Channel;
@@ -110,11 +109,7 @@ impl GatewayClient {
     /// 读取构建上下文中的文件内容
     ///
     /// `context_ref` 是通过 Solve 获取的上下文引用 ID
-    pub async fn read_file(
-        &mut self,
-        context_ref: &str,
-        path: &str,
-    ) -> crate::Result<Vec<u8>> {
+    pub async fn read_file(&mut self, context_ref: &str, path: &str) -> crate::Result<Vec<u8>> {
         let resp = self
             .client
             .read_file(gateway::ReadFileRequest {
@@ -123,9 +118,7 @@ impl GatewayClient {
                 range: None,
             })
             .await
-            .map_err(|e| {
-                anyhow::anyhow!("gateway ReadFile({path}) failed: {e}")
-            })?;
+            .map_err(|e| anyhow::anyhow!("gateway ReadFile({path}) failed: {e}"))?;
         Ok(resp.into_inner().data)
     }
 
@@ -145,9 +138,7 @@ impl GatewayClient {
                 include_pattern: String::new(),
             })
             .await
-            .map_err(|e| {
-                anyhow::anyhow!("gateway ReadDir({path}) failed: {e}")
-            })?;
+            .map_err(|e| anyhow::anyhow!("gateway ReadDir({path}) failed: {e}"))?;
 
         let entries = resp
             .into_inner()
@@ -267,9 +258,7 @@ impl GatewayClient {
         match result.result {
             Some(gateway::result::Result::Ref(r)) => Ok(r.id),
             Some(gateway::result::Result::RefDeprecated(id)) => Ok(id),
-            _ => Err(
-                anyhow::anyhow!("gateway Solve returned unexpected result type").into(),
-            ),
+            _ => Err(anyhow::anyhow!("gateway Solve returned unexpected result type").into()),
         }
     }
 
@@ -302,8 +291,7 @@ impl GatewayClient {
         context_ref: &'a str,
         remote_path: &'a str,
         local_dir: &'a std::path::Path,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::Result<()>> + 'a>>
-    {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::Result<()>> + 'a>> {
         Box::pin(async move {
             let entries = self.read_dir(context_ref, remote_path).await?;
 
@@ -348,9 +336,8 @@ impl GatewayClient {
         image_config: &ImageConfig,
     ) -> crate::Result<()> {
         // 将 ImageConfig 编码为 metadata
-        let config_json =
-            crate::buildkit::grpc_client::build_frontend_attrs(image_config)
-                .map_err(|e| anyhow::anyhow!("序列化 ImageConfig 失败: {e}"))?;
+        let config_json = crate::buildkit::grpc_client::build_frontend_attrs(image_config)
+            .map_err(|e| anyhow::anyhow!("序列化 ImageConfig 失败: {e}"))?;
 
         let metadata: HashMap<String, Vec<u8>> = config_json
             .into_iter()
@@ -443,8 +430,7 @@ async fn run_frontend_async() -> crate::Result<bool> {
         let context_ref = gateway.solve_context().await?;
         tracing::info!(context_ref = %context_ref, "获取构建上下文引用");
 
-        let temp_dir = tempfile::tempdir()
-            .map_err(|e| anyhow::anyhow!("创建临时目录失败: {e}"))?;
+        let temp_dir = tempfile::tempdir().map_err(|e| anyhow::anyhow!("创建临时目录失败: {e}"))?;
         gateway
             .sync_context_to_dir(&context_ref, temp_dir.path())
             .await?;
@@ -477,10 +463,7 @@ async fn run_frontend_async() -> crate::Result<bool> {
     let opts = ConvertPlanOptions {
         secrets_hash: build_args.get("secrets-hash").cloned(),
         platform,
-        cache_key: build_args
-            .get("cache-key")
-            .cloned()
-            .unwrap_or_default(),
+        cache_key: build_args.get("cache-key").cloned().unwrap_or_default(),
     };
 
     // 6. 转换为 LLB
@@ -646,10 +629,7 @@ mod tests {
         ]);
         let args = parse_build_args(&opts);
         assert_eq!(args.len(), 2);
-        assert_eq!(
-            args.get("secrets-hash").map(String::as_str),
-            Some("abc123")
-        );
+        assert_eq!(args.get("secrets-hash").map(String::as_str), Some("abc123"));
         assert_eq!(args.get("cache-key").map(String::as_str), Some("mykey"));
     }
 

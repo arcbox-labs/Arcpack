@@ -2,12 +2,11 @@
 ///
 /// 对齐 railpack `core/providers/java/java.go`
 /// 支持 wrapper（mvnw/gradlew）、Spring Boot 检测、运行时 JDK 分离。
-
 pub mod gradle;
 pub mod maven;
 
-use crate::app::App;
 use crate::app::environment::Environment;
+use crate::app::App;
 use crate::generate::command_step_builder::CommandStepBuilder;
 use crate::generate::mise_step_builder::{self, MiseStepBuilder};
 use crate::generate::GenerateContext;
@@ -43,7 +42,10 @@ impl JavaProvider {
 
     /// 检测构建工具
     fn detect_build_tool(app: &App) -> Option<BuildTool> {
-        if app.has_file("gradlew") || app.has_file("build.gradle") || app.has_file("build.gradle.kts") {
+        if app.has_file("gradlew")
+            || app.has_file("build.gradle")
+            || app.has_file("build.gradle.kts")
+        {
             return Some(BuildTool::Gradle);
         }
         if app.has_match("pom.{xml,atom,clj,groovy,rb,scala,yaml,yml}") || app.has_file("pom.xml") {
@@ -232,10 +234,8 @@ impl Provider for JavaProvider {
             ])),
         );
 
-        let build_layer = Layer::new_step_layer(
-            "build",
-            Some(Filter::include_only(vec![".".to_string()])),
-        );
+        let build_layer =
+            Layer::new_step_layer("build", Some(Filter::include_only(vec![".".to_string()])));
 
         ctx.deploy.add_inputs(&[runtime_mise_layer, build_layer]);
 
@@ -476,10 +476,7 @@ mod tests {
         assert!(step_names.contains(&"build"));
 
         assert!(ctx.deploy.start_cmd.is_some());
-        assert_eq!(
-            ctx.metadata.get("javaPackageManager"),
-            Some("maven")
-        );
+        assert_eq!(ctx.metadata.get("javaPackageManager"), Some("maven"));
 
         // 验证运行时 JDK 步骤
         assert!(!ctx.additional_mise_builders.is_empty());
@@ -496,9 +493,6 @@ mod tests {
         provider.initialize(&mut ctx).unwrap();
         provider.plan(&mut ctx).unwrap();
 
-        assert_eq!(
-            ctx.metadata.get("javaPackageManager"),
-            Some("gradle")
-        );
+        assert_eq!(ctx.metadata.get("javaPackageManager"), Some("gradle"));
     }
 }

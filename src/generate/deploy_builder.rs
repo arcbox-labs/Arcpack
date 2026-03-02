@@ -64,9 +64,9 @@ impl DeployBuilder {
         if !self.apt_packages.is_empty() {
             let mut runtime_apt_step = Step::new("packages:apt:runtime");
             runtime_apt_step.inputs = vec![base_layer.clone()];
-            runtime_apt_step.commands = vec![
-                BuildStepOptions::new_apt_install_command(&self.apt_packages),
-            ];
+            runtime_apt_step.commands = vec![BuildStepOptions::new_apt_install_command(
+                &self.apt_packages,
+            )];
             runtime_apt_step.caches = options.caches.get_apt_caches();
             runtime_apt_step.secrets = vec![];
 
@@ -93,8 +93,8 @@ impl Default for DeployBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::cache_context::CacheContext;
+    use super::*;
 
     fn make_options() -> BuildStepOptions {
         BuildStepOptions {

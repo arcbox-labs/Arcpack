@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use crate::app::App;
 use crate::app::environment::Environment;
+use crate::app::App;
 use crate::config::Config;
 use crate::mise;
 use crate::plan::{BuildPlan, Command, Filter, Layer, Step, ARCPACK_BUILDER_IMAGE};
@@ -111,10 +111,7 @@ impl MiseStepBuilder {
         if paths.is_empty() {
             return Layer::default();
         }
-        Layer::new_step_layer(
-            &self.display_name,
-            Some(Filter::include_only(paths)),
-        )
+        Layer::new_step_layer(&self.display_name, Some(Filter::include_only(paths)))
     }
 
     /// 构建 mise 步骤到 BuildPlan
@@ -135,9 +132,9 @@ impl MiseStepBuilder {
         if !self.supporting_apt_packages.is_empty() {
             let mut apt_step = Step::new("packages:apt:build");
             apt_step.inputs = vec![base_layer.clone()];
-            apt_step.commands = vec![
-                BuildStepOptions::new_apt_install_command(&self.supporting_apt_packages),
-            ];
+            apt_step.commands = vec![BuildStepOptions::new_apt_install_command(
+                &self.supporting_apt_packages,
+            )];
             apt_step.caches = options.caches.get_apt_caches();
             apt_step.secrets = vec![];
 
@@ -153,14 +150,24 @@ impl MiseStepBuilder {
             step.commands.push(Command::new_path("/mise/shims"));
 
             // 设置 mise 环境变量
-            step.variables.insert("MISE_DATA_DIR".to_string(), "/mise".to_string());
-            step.variables.insert("MISE_CONFIG_DIR".to_string(), "/mise".to_string());
-            step.variables.insert("MISE_CACHE_DIR".to_string(), "/mise/cache".to_string());
-            step.variables.insert("MISE_SHIMS_DIR".to_string(), "/mise/shims".to_string());
-            step.variables.insert("MISE_INSTALLS_DIR".to_string(), "/mise/installs".to_string());
-            step.variables.insert("MISE_NODE_VERIFY".to_string(), "false".to_string());
-            step.variables.insert("MISE_PARANOID".to_string(), "1".to_string());
-            step.variables.insert("MISE_TRUSTED_CONFIG_PATHS".to_string(), "/app".to_string());
+            step.variables
+                .insert("MISE_DATA_DIR".to_string(), "/mise".to_string());
+            step.variables
+                .insert("MISE_CONFIG_DIR".to_string(), "/mise".to_string());
+            step.variables
+                .insert("MISE_CACHE_DIR".to_string(), "/mise/cache".to_string());
+            step.variables
+                .insert("MISE_SHIMS_DIR".to_string(), "/mise/shims".to_string());
+            step.variables.insert(
+                "MISE_INSTALLS_DIR".to_string(),
+                "/mise/installs".to_string(),
+            );
+            step.variables
+                .insert("MISE_NODE_VERIFY".to_string(), "false".to_string());
+            step.variables
+                .insert("MISE_PARANOID".to_string(), "1".to_string());
+            step.variables
+                .insert("MISE_TRUSTED_CONFIG_PATHS".to_string(), "/app".to_string());
             step.variables.insert(
                 "MISE_IDIOMATIC_VERSION_FILE_ENABLE_TOOLS".to_string(),
                 mise::IDIOMATIC_VERSION_FILE_TOOLS.to_string(),
@@ -173,7 +180,8 @@ impl MiseStepBuilder {
 
             // 传递 MISE_VERBOSE
             if let Some(verbose) = env.get_variable("MISE_VERBOSE") {
-                step.variables.insert("MISE_VERBOSE".to_string(), verbose.to_string());
+                step.variables
+                    .insert("MISE_VERBOSE".to_string(), verbose.to_string());
             }
 
             // 复制用户 mise 配置文件
@@ -204,16 +212,18 @@ impl MiseStepBuilder {
             pkg_names.sort();
             let pkg_list: Vec<String> = pkg_names.iter().map(|s| s.to_string()).collect();
 
-            step.commands.push(Command::File(crate::plan::command::FileCommand {
-                path: "/etc/mise/config.toml".to_string(),
-                name: "mise.toml".to_string(),
-                mode: None,
-                custom_name: Some("create mise config".to_string()),
-            }));
-            step.commands.push(Command::Exec(crate::plan::command::ExecCommand {
-                cmd: MISE_INSTALL_COMMAND.to_string(),
-                custom_name: Some(format!("install mise packages: {}", pkg_list.join(", "))),
-            }));
+            step.commands
+                .push(Command::File(crate::plan::command::FileCommand {
+                    path: "/etc/mise/config.toml".to_string(),
+                    name: "mise.toml".to_string(),
+                    mode: None,
+                    custom_name: Some("create mise config".to_string()),
+                }));
+            step.commands
+                .push(Command::Exec(crate::plan::command::ExecCommand {
+                    cmd: MISE_INSTALL_COMMAND.to_string(),
+                    custom_name: Some(format!("install mise packages: {}", pkg_list.join(", "))),
+                }));
 
             step.assets.insert("mise.toml".to_string(), mise_toml);
         }
@@ -232,8 +242,8 @@ impl MiseStepBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::cache_context::CacheContext;
+    use super::*;
     use crate::resolver::{ResolvedPackage, VersionResolver};
 
     struct MockResolver;
@@ -325,7 +335,8 @@ mod tests {
             caches: CacheContext::new(),
         };
 
-        msb.build(&mut plan, &mut options, &resolver, &app, &env).unwrap();
+        msb.build(&mut plan, &mut options, &resolver, &app, &env)
+            .unwrap();
         assert_eq!(plan.steps.len(), 1);
         assert_eq!(plan.steps[0].name, Some(MISE_STEP_NAME.to_string()));
         // 验证 mise.toml asset 存在
@@ -362,7 +373,8 @@ mod tests {
             caches: CacheContext::new(),
         };
 
-        msb.build(&mut plan, &mut options, &resolver, &app, &env).unwrap();
+        msb.build(&mut plan, &mut options, &resolver, &app, &env)
+            .unwrap();
         assert_eq!(plan.steps.len(), 2);
         assert_eq!(plan.steps[0].name, Some("packages:apt:build".to_string()));
         assert_eq!(plan.steps[1].name, Some(MISE_STEP_NAME.to_string()));

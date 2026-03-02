@@ -1,18 +1,17 @@
 /// Build 命令 —— 生成 OCI 镜像
 ///
 /// 对齐 railpack `cmd/cli/build.go`
-
 use std::collections::HashMap;
 
 use sha2::{Digest, Sha256};
 
-use crate::buildkit::BuildOutput;
 use crate::buildkit::convert::{convert_plan_to_llb, ConvertPlanOptions};
 use crate::buildkit::daemon::select_daemon_manager;
-use crate::buildkit::platform::parse_platform_with_defaults;
-use crate::buildkit::grpc::solve::CacheConfig;
-use crate::buildkit::grpc_client::{GrpcBuildKitClient, GrpcBuildRequest, build_export_config};
 use crate::buildkit::grpc::progress::ProgressMode;
+use crate::buildkit::grpc::solve::CacheConfig;
+use crate::buildkit::grpc_client::{build_export_config, GrpcBuildKitClient, GrpcBuildRequest};
+use crate::buildkit::platform::parse_platform_with_defaults;
+use crate::buildkit::BuildOutput;
 use crate::cli::common::{generate_build_result_for_command, parse_env_vars, CommonBuildArgs};
 use crate::cli::pretty_print::{pretty_print_build_result, OutputStream, PrintOptions};
 use crate::ArcpackError;
@@ -141,10 +140,7 @@ pub fn run_build(args: &BuildArgs) -> crate::Result<bool> {
         let dir_abs = dir_path
             .canonicalize()
             .unwrap_or_else(|_| dir_path.to_path_buf());
-        let raw = dir_abs
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
+        let raw = dir_abs.file_name().and_then(|n| n.to_str()).unwrap_or("");
         default_name = sanitize_image_name(raw);
         Some(default_name.as_str())
     };
@@ -279,14 +275,12 @@ pub(crate) fn definition_to_json(
         if let Some(ref inner) = op.op {
             match inner {
                 pb::op::Op::Source(src) => {
-                    entry["identifier"] =
-                        serde_json::Value::String(src.identifier.clone());
+                    entry["identifier"] = serde_json::Value::String(src.identifier.clone());
                 }
                 pb::op::Op::Exec(exec) => {
                     if let Some(ref meta) = exec.meta {
                         entry["args"] = serde_json::json!(meta.args);
-                        entry["cwd"] =
-                            serde_json::Value::String(meta.cwd.clone());
+                        entry["cwd"] = serde_json::Value::String(meta.cwd.clone());
                     }
                 }
                 _ => {}
@@ -310,8 +304,7 @@ pub(crate) fn write_dump_output(path: &str, data: &[u8]) -> crate::Result<()> {
             .write_all(data)
             .map_err(|e| anyhow::anyhow!("写入 stdout 失败: {}", e))?;
     } else {
-        std::fs::write(path, data)
-            .map_err(|e| anyhow::anyhow!("写入文件 {} 失败: {}", path, e))?;
+        std::fs::write(path, data).map_err(|e| anyhow::anyhow!("写入文件 {} 失败: {}", path, e))?;
     }
     Ok(())
 }
@@ -326,7 +319,13 @@ fn sanitize_image_name(raw: &str) -> String {
     let sanitized: String = raw
         .to_lowercase()
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     let trimmed = sanitized.trim_matches(|c: char| c == '-' || c == '.');
     if trimmed.is_empty() {
@@ -405,20 +404,14 @@ fn compute_secrets_hash(env_vars: &HashMap<String, String>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Parser;
     use crate::plan::BuildPlan;
+    use clap::Parser;
 
     // === --dump-llb 解析测试 ===
 
     #[test]
     fn test_dump_llb_flag_parses() {
-        let cli = crate::cli::Cli::parse_from([
-            "arcpack",
-            "build",
-            ".",
-            "--dump-llb",
-            "output.pb",
-        ]);
+        let cli = crate::cli::Cli::parse_from(["arcpack", "build", ".", "--dump-llb", "output.pb"]);
         if let crate::cli::Commands::Build(args) = cli.command {
             assert_eq!(args.dump_llb, Some("output.pb".to_string()));
             assert!(!args.dump_llb_json);
@@ -429,8 +422,7 @@ mod tests {
 
     #[test]
     fn test_dump_llb_stdout_parses() {
-        let cli =
-            crate::cli::Cli::parse_from(["arcpack", "build", ".", "--dump-llb", "-"]);
+        let cli = crate::cli::Cli::parse_from(["arcpack", "build", ".", "--dump-llb", "-"]);
         if let crate::cli::Commands::Build(args) = cli.command {
             assert_eq!(args.dump_llb, Some("-".to_string()));
         } else {
@@ -613,10 +605,7 @@ mod tests {
                 args.cache_import,
                 Some("type=gha,url=https://example.com".to_string())
             );
-            assert_eq!(
-                args.cache_export,
-                Some("type=gha,mode=max".to_string())
-            );
+            assert_eq!(args.cache_export, Some("type=gha,mode=max".to_string()));
         } else {
             panic!("Expected Build command");
         }

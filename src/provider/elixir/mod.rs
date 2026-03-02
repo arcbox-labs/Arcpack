@@ -2,19 +2,18 @@
 ///
 /// 对齐 railpack `core/providers/elixir/elixir.go`
 /// 支持 Elixir/Erlang 版本映射、Phoenix 检测、mix release。
-
 use std::collections::HashMap;
 
 use regex::Regex;
 
-use crate::app::App;
 use crate::app::environment::Environment;
+use crate::app::App;
 use crate::generate::command_step_builder::CommandStepBuilder;
 use crate::generate::mise_step_builder::{self, MiseStepBuilder};
 use crate::generate::GenerateContext;
 use crate::plan::{Command, Filter, Layer};
-use crate::provider::Provider;
 use crate::provider::node::NodeProvider;
+use crate::provider::Provider;
 use crate::Result;
 
 /// 默认版本
@@ -133,6 +132,52 @@ impl ElixirProvider {
             .downcast_mut::<CommandStepBuilder>()
             .unwrap()
     }
+
+    /// 安装 assets/ 子目录中的 Node.js 依赖（Phoenix 前端构建）
+    ///
+    /// 对齐 railpack 的思路：
+    /// 1. 临时将 ctx.app 切换到 assets 子目录，让 NodeProvider 正常 detect/initialize
+    /// 2. 复用 NodeProvider 的 mise 包注册与 install 逻辑（包含 bun/pnpm/yarn 检测）
+    /// 3. 将 copy 命令源路径改写为 `assets/...`，使其从项目根复制
+    ///
+    /// 返回值：是否创建了 `install:node` 步骤。
+    fn install_node_assets(ctx: &mut GenerateContext) -> Result<bool> {
+        if !ctx.app.has_file("assets/package.json") {
+            return Ok(false);
+        }
+
+        let assets_source = ctx.app.source().join("assets");
+        let assets_app = App::new(assets_source)?;
+
+        // 临时切换 ctx.app 到 assets 目录，结束时恢复
+        let original_app = std::mem::replace(&mut ctx.app, assets_app);
+        let result = (|| -> Result<bool> {
+            let mut node = NodeProvider::new();
+            if !node.detect(&ctx.app, &ctx.env)? {
+                return Ok(false);
+            }
+
+            node.initialize(ctx)?;
+            node.install_mise_packages(ctx)?;
+
+            let install_node = ctx.new_command_step("install:node");
+            install_node.add_input(Layer::new_step_layer("install", None));
+            node.install_node_deps(ctx, "install:node")?;
+
+            // NodeProvider 以 assets 根目录为上下文生成了 copy 命令，这里将 src 改回项目根路径
+            let step = Self::get_command_step(&mut ctx.steps, "install:node");
+            for cmd in &mut step.commands {
+                if let Command::Copy(copy_cmd) = cmd {
+                    copy_cmd.src = format!("assets/{}", copy_cmd.src);
+                }
+            }
+
+            Ok(true)
+        })();
+
+        ctx.app = original_app;
+        result
+    }
 }
 
 impl Provider for ElixirProvider {
@@ -188,8 +233,7 @@ impl Provider for ElixirProvider {
 
         // Phoenix 检测
         self.is_phoenix = Self::detect_phoenix(&ctx.app);
-        self.has_assets = ctx.app.has_file("assets/package.json")
-            || ctx.app.has_match("assets");
+        self.has_assets = ctx.app.has_file("assets/package.json") || ctx.app.has_match("assets");
 
         Ok(())
     }
@@ -208,11 +252,8 @@ impl Provider for ElixirProvider {
 
         {
             let mise = ctx.mise_step_builder.as_mut().unwrap();
-            let elixir_ref = mise.default_package(
-                &mut ctx.resolver,
-                "elixir",
-                DEFAULT_ELIXIR_VERSION,
-            );
+            let elixir_ref =
+                mise.default_package(&mut ctx.resolver, "elixir", DEFAULT_ELIXIR_VERSION);
             mise.version(
                 &mut ctx.resolver,
                 &elixir_ref,
@@ -220,11 +261,8 @@ impl Provider for ElixirProvider {
                 "resolved",
             );
 
-            let erlang_ref = mise.default_package(
-                &mut ctx.resolver,
-                "erlang",
-                DEFAULT_ERLANG_VERSION,
-            );
+            let erlang_ref =
+                mise.default_package(&mut ctx.resolver, "erlang", DEFAULT_ERLANG_VERSION);
             mise.version(
                 &mut ctx.resolver,
                 &erlang_ref,
@@ -281,52 +319,14 @@ impl Provider for ElixirProvider {
         }
 
         // === Node.js 集成（assets/ 子目录）===
-        let has_assets_node = ctx.app.has_file("assets/package.json");
-        if has_assets_node {
-            // 注册 Node.js 到 mise
-            // TODO: NodeProvider::new() 未调用 initialize()，不会检测 Bun 等替代包管理器；
-            //       当前仅用于 mise 注册和依赖安装，影响有限，后续如需 Bun 支持需补充初始化。
-            let node = NodeProvider::new();
-            node.install_mise_packages(ctx)?;
-
-            // install:node 步骤
-            let install_node = ctx.new_command_step("install:node");
-            install_node.add_input(Layer::new_step_layer("install", None));
-            {
-                let has_npm_lock = ctx.app.has_file("assets/package-lock.json");
-                let has_yarn_lock = ctx.app.has_file("assets/yarn.lock");
-                let step = Self::get_command_step(&mut ctx.steps, "install:node");
-
-                // 复制 assets 目录的 Node.js 文件
-                step.add_command(Command::new_copy("assets/package.json", "assets/package.json"));
-                if has_npm_lock {
-                    step.add_command(Command::new_copy(
-                        "assets/package-lock.json",
-                        "assets/package-lock.json",
-                    ));
-                }
-                if has_yarn_lock {
-                    step.add_command(Command::new_copy(
-                        "assets/yarn.lock",
-                        "assets/yarn.lock",
-                    ));
-                }
-
-                // 在 assets/ 子目录安装 Node.js 依赖
-                if has_npm_lock {
-                    step.add_command(Command::new_exec_shell("cd assets && npm ci"));
-                } else if has_yarn_lock {
-                    step.add_command(Command::new_exec_shell(
-                        "cd assets && yarn install --frozen-lockfile",
-                    ));
-                } else {
-                    step.add_command(Command::new_exec_shell("cd assets && npm install"));
-                }
-            }
-        }
+        let has_assets_node = Self::install_node_assets(ctx)?;
 
         // === build 步骤 ===
-        let build_input = if has_assets_node { "install:node" } else { "install" };
+        let build_input = if has_assets_node {
+            "install:node"
+        } else {
+            "install"
+        };
         let build = ctx.new_command_step("build");
         build.add_input(Layer::new_step_layer(build_input, None));
         {
@@ -383,11 +383,11 @@ impl Provider for ElixirProvider {
             ("LC_ALL".to_string(), "en_US.UTF-8".to_string()),
             ("MIX_ENV".to_string(), "prod".to_string()),
             ("MIX_HOME".to_string(), "/root/.mix".to_string()),
-            ("MIX_ARCHIVES".to_string(), "/root/.mix/archives".to_string()),
             (
-                "ELIXIR_ERL_OPTIONS".to_string(),
-                "+fnu".to_string(),
+                "MIX_ARCHIVES".to_string(),
+                "/root/.mix/archives".to_string(),
             ),
+            ("ELIXIR_ERL_OPTIONS".to_string(), "+fnu".to_string()),
         ]);
         for (k, v) in deploy_vars {
             ctx.deploy.variables.insert(k, v);
@@ -400,10 +400,8 @@ impl Provider for ElixirProvider {
             .map(|m| m.get_layer())
             .unwrap_or_default();
 
-        let build_layer = Layer::new_step_layer(
-            "build",
-            Some(Filter::include_only(vec![".".to_string()])),
-        );
+        let build_layer =
+            Layer::new_step_layer("build", Some(Filter::include_only(vec![".".to_string()])));
 
         ctx.deploy.add_inputs(&[mise_layer, build_layer]);
 
@@ -503,10 +501,7 @@ end
             ElixirProvider::parse_app_name("app: :my_app,"),
             Some("my_app".to_string())
         );
-        assert_eq!(
-            ElixirProvider::parse_app_name("nothing here"),
-            None
-        );
+        assert_eq!(ElixirProvider::parse_app_name("nothing here"), None);
     }
 
     #[test]
@@ -525,11 +520,26 @@ end
 
     #[test]
     fn test_elixir_to_erlang() {
-        assert_eq!(ElixirProvider::elixir_to_erlang("1.17"), Some("27".to_string()));
-        assert_eq!(ElixirProvider::elixir_to_erlang("1.14"), Some("26".to_string()));
-        assert_eq!(ElixirProvider::elixir_to_erlang("1.10"), Some("23".to_string()));
-        assert_eq!(ElixirProvider::elixir_to_erlang("1.6"), Some("21".to_string()));
-        assert_eq!(ElixirProvider::elixir_to_erlang("1.0"), Some("18".to_string()));
+        assert_eq!(
+            ElixirProvider::elixir_to_erlang("1.17"),
+            Some("27".to_string())
+        );
+        assert_eq!(
+            ElixirProvider::elixir_to_erlang("1.14"),
+            Some("26".to_string())
+        );
+        assert_eq!(
+            ElixirProvider::elixir_to_erlang("1.10"),
+            Some("23".to_string())
+        );
+        assert_eq!(
+            ElixirProvider::elixir_to_erlang("1.6"),
+            Some("21".to_string())
+        );
+        assert_eq!(
+            ElixirProvider::elixir_to_erlang("1.0"),
+            Some("18".to_string())
+        );
     }
 
     // === Phoenix 检测测试 ===
@@ -583,6 +593,35 @@ end
             ctx.deploy.variables.get("MIX_ENV").map(|s| s.as_str()),
             Some("prod")
         );
+    }
+
+    #[test]
+    fn test_plan_with_assets_bun_registers_bun_runtime() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("mix.exs"), basic_mix_exs()).unwrap();
+
+        let assets_dir = dir.path().join("assets");
+        fs::create_dir_all(&assets_dir).unwrap();
+        fs::write(
+            assets_dir.join("package.json"),
+            r#"{
+  "name": "frontend",
+  "scripts": {
+    "build": "bun run build"
+  }
+}"#,
+        )
+        .unwrap();
+        fs::write(assets_dir.join("bun.lockb"), "").unwrap();
+
+        let mut ctx = make_ctx(&dir);
+        let mut provider = ElixirProvider::new();
+        provider.initialize(&mut ctx).unwrap();
+        provider.plan(&mut ctx).unwrap();
+
+        let step_names: Vec<&str> = ctx.steps.iter().map(|s| s.name()).collect();
+        assert!(step_names.contains(&"install:node"));
+        assert!(ctx.resolver.get("bun").is_some());
     }
 
     #[test]

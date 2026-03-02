@@ -108,11 +108,7 @@ impl DaemonManager for SubprocessDaemonManager {
                 );
 
                 // 等待最多 5 秒
-                let timeout = tokio::time::timeout(
-                    Duration::from_secs(5),
-                    child.wait(),
-                )
-                .await;
+                let timeout = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
 
                 if timeout.is_err() {
                     // 超时则 SIGKILL

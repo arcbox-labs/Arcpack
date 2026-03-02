@@ -8,16 +8,14 @@ use tracing::{debug, info};
 
 use buildkit_client::session::{SecretsServer, Session};
 
-use crate::buildkit::BuildOutput;
 use crate::buildkit::grpc::channel::create_channel;
-use crate::buildkit::grpc::progress::{
-    parse_status_response, render_plain, ProgressMode,
-};
+use crate::buildkit::grpc::progress::{parse_status_response, render_plain, ProgressMode};
 use crate::buildkit::grpc::solve::{self, CacheConfig, ExportConfig, SolveConfig};
 use crate::buildkit::image::ImageConfig;
 use crate::buildkit::proto::control::control_client::ControlClient;
 use crate::buildkit::proto::control::StatusRequest;
 use crate::buildkit::proto::pb;
+use crate::buildkit::BuildOutput;
 
 /// gRPC 构建客户端——通过 tonic 直连 buildkitd
 ///
@@ -131,13 +129,10 @@ impl GrpcBuildKitClient {
                 Ok(response) => {
                     let mut stream = response.into_inner();
                     tokio::spawn(async move {
-                        while let Some(msg) =
-                            tokio_stream::StreamExt::next(&mut stream).await
-                        {
+                        while let Some(msg) = tokio_stream::StreamExt::next(&mut stream).await {
                             match msg {
                                 Ok(status_resp) => {
-                                    let events =
-                                        parse_status_response(&status_resp);
+                                    let events = parse_status_response(&status_resp);
                                     if !matches!(progress_mode, ProgressMode::Quiet) {
                                         for event in &events {
                                             let line = render_plain(event);
@@ -171,10 +166,7 @@ impl GrpcBuildKitClient {
         inject_session_metadata(grpc_request.metadata_mut(), &session);
 
         let mut client = ControlClient::new(self.channel.clone());
-        let solve_result = client
-            .solve(grpc_request)
-            .await
-            .context("Solve RPC failed");
+        let solve_result = client.solve(grpc_request).await.context("Solve RPC failed");
 
         // 6. 清理后台 task
         if progress_handle.is_finished() {
@@ -192,9 +184,7 @@ impl GrpcBuildKitClient {
         let response = solve_result?;
         let exporter_response = response.into_inner().exporter_response;
 
-        let image_digest = exporter_response
-            .get("containerimage.digest")
-            .cloned();
+        let image_digest = exporter_response.get("containerimage.digest").cloned();
 
         info!(
             digest = image_digest.as_deref().unwrap_or("none"),
@@ -213,14 +203,9 @@ impl GrpcBuildKitClient {
 ///
 /// buildkit-client 的 Session::metadata() 返回 session 头信息，
 /// 需要附加到 Solve RPC 的 metadata 中让 buildkitd 关联 session。
-fn inject_session_metadata(
-    metadata: &mut tonic::metadata::MetadataMap,
-    session: &Session,
-) {
+fn inject_session_metadata(metadata: &mut tonic::metadata::MetadataMap, session: &Session) {
     for (key, values) in session.metadata() {
-        let k = match key
-            .parse::<tonic::metadata::MetadataKey<tonic::metadata::Ascii>>()
-        {
+        let k = match key.parse::<tonic::metadata::MetadataKey<tonic::metadata::Ascii>>() {
             Ok(k) => k,
             Err(e) => {
                 debug!(key = %key, error = %e, "skipping unparseable metadata key");
@@ -228,9 +213,7 @@ fn inject_session_metadata(
             }
         };
         for value in values {
-            match value
-                .parse::<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>()
-            {
+            match value.parse::<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>() {
                 Ok(v) => {
                     metadata.append(k.clone(), v);
                 }
@@ -253,10 +236,7 @@ pub fn build_frontend_attrs(config: &ImageConfig) -> Result<HashMap<String, Stri
 
     // OCI Image Config JSON 编码
     let image_config_json = serialize_image_config(config)?;
-    attrs.insert(
-        "containerimage.config".to_string(),
-        image_config_json,
-    );
+    attrs.insert("containerimage.config".to_string(), image_config_json);
 
     Ok(attrs)
 }
@@ -276,7 +256,10 @@ fn serialize_image_config(config: &ImageConfig) -> Result<String> {
     }
 
     if !config.entrypoint.is_empty() {
-        oci_config.insert("Entrypoint".into(), serde_json::to_value(&config.entrypoint)?);
+        oci_config.insert(
+            "Entrypoint".into(),
+            serde_json::to_value(&config.entrypoint)?,
+        );
     }
 
     if !config.cmd.is_empty() {
@@ -298,9 +281,7 @@ pub fn build_export_config(
     push: bool,
 ) -> Result<ExportConfig> {
     if let Some(dir) = output_dir {
-        return Ok(ExportConfig::Local {
-            dest: dir.clone(),
-        });
+        return Ok(ExportConfig::Local { dest: dir.clone() });
     }
 
     if let Some(name) = image_name {
@@ -346,12 +327,7 @@ mod tests {
 
     #[test]
     fn test_build_frontend_attrs_json_contains_env() {
-        let config = make_image_config(
-            &["PATH=/usr/bin", "NODE_ENV=production"],
-            "/app",
-            &[],
-            &[],
-        );
+        let config = make_image_config(&["PATH=/usr/bin", "NODE_ENV=production"], "/app", &[], &[]);
         let attrs = build_frontend_attrs(&config).unwrap();
         let json = attrs.get("containerimage.config").unwrap();
 
@@ -374,8 +350,7 @@ mod tests {
 
     #[test]
     fn test_build_frontend_attrs_json_contains_entrypoint() {
-        let config =
-            make_image_config(&[], "", &["/bin/bash", "-c"], &["node server.js"]);
+        let config = make_image_config(&[], "", &["/bin/bash", "-c"], &["node server.js"]);
         let attrs = build_frontend_attrs(&config).unwrap();
         let json = attrs.get("containerimage.config").unwrap();
 
@@ -461,12 +436,7 @@ mod tests {
 
     #[test]
     fn test_serialize_image_config_valid_json() {
-        let config = make_image_config(
-            &["PATH=/usr/bin"],
-            "/app",
-            &["/bin/sh"],
-            &["start"],
-        );
+        let config = make_image_config(&["PATH=/usr/bin"], "/app", &["/bin/sh"], &["start"]);
         let json = serialize_image_config(&config).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(parsed.is_object());

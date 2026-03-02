@@ -2,11 +2,10 @@
 ///
 /// 对齐 railpack `core/providers/staticfile/staticfile.go`
 /// 支持多种根目录检测方式和 Caddyfile 模板。
-
 use serde::Deserialize;
 
-use crate::app::App;
 use crate::app::environment::Environment;
+use crate::app::App;
 use crate::generate::command_step_builder::CommandStepBuilder;
 use crate::generate::install_bin_builder::InstallBinBuilder;
 use crate::generate::mise_step_builder::{self, MiseStepBuilder};
@@ -141,11 +140,8 @@ impl Provider for StaticFileProvider {
 
         // 安装 Caddy 二进制（通过 InstallBinBuilder，和 Node SPA 模式一致）
         let mut caddy_builder = InstallBinBuilder::new(CADDY_STEP_NAME);
-        let caddy_ref = caddy_builder.default_package(
-            &mut ctx.resolver,
-            "caddy",
-            DEFAULT_CADDY_VERSION,
-        );
+        let caddy_ref =
+            caddy_builder.default_package(&mut ctx.resolver, "caddy", DEFAULT_CADDY_VERSION);
         let _ = caddy_ref;
 
         let caddy_layer = caddy_builder.get_layer();
@@ -153,8 +149,8 @@ impl Provider for StaticFileProvider {
         ctx.steps.push(Box::new(caddy_builder));
 
         // 检查用户自定义 Caddyfile
-        let has_custom_caddyfile = ctx.app.has_file("Caddyfile")
-            || ctx.app.has_file("Caddyfile.template");
+        let has_custom_caddyfile =
+            ctx.app.has_file("Caddyfile") || ctx.app.has_file("Caddyfile.template");
         let local_layer = ctx.new_local_layer();
 
         // build 步骤：写入 Caddyfile + caddy fmt
@@ -174,21 +170,16 @@ impl Provider for StaticFileProvider {
                 build.add_command(Command::new_file("/app/Caddyfile", &caddyfile_content));
             }
 
-            build.add_command(Command::new_exec(
-                "caddy fmt --overwrite /app/Caddyfile",
-            ));
+            build.add_command(Command::new_exec("caddy fmt --overwrite /app/Caddyfile"));
         }
 
         // Deploy 配置
-        ctx.deploy.start_cmd = Some(
-            "caddy run --config /app/Caddyfile --adapter caddyfile 2>&1".to_string(),
-        );
+        ctx.deploy.start_cmd =
+            Some("caddy run --config /app/Caddyfile --adapter caddyfile 2>&1".to_string());
 
         // deploy inputs: caddy 二进制 + build 步骤输出
-        let build_layer = Layer::new_step_layer(
-            "build",
-            Some(Filter::include_only(vec![".".to_string()])),
-        );
+        let build_layer =
+            Layer::new_step_layer("build", Some(Filter::include_only(vec![".".to_string()])));
 
         ctx.deploy.add_inputs(&[caddy_layer, build_layer]);
 
@@ -385,10 +376,7 @@ mod tests {
         fs::write(dir.path().join("index.html"), "").unwrap();
         let mut ctx = make_ctx_with_env(
             &dir,
-            HashMap::from([(
-                "ARCPACK_STATIC_FILE_ROOT".to_string(),
-                "build".to_string(),
-            )]),
+            HashMap::from([("ARCPACK_STATIC_FILE_ROOT".to_string(), "build".to_string())]),
         );
         let mut provider = StaticFileProvider::new();
         provider.initialize(&mut ctx).unwrap();

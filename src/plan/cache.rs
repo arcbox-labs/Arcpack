@@ -13,7 +13,6 @@ pub enum CacheType {
     Locked,
 }
 
-
 /// 缓存定义
 ///
 /// directory 和 cache_type 均为必填字段，避免构造无效缓存（无目录或无类型）。

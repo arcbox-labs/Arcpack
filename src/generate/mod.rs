@@ -1,24 +1,22 @@
 pub mod cache_context;
-pub mod metadata;
-pub mod log_collector;
-pub mod deploy_builder;
-pub mod install_bin_builder;
 pub mod command_step_builder;
-pub mod mise_step_builder;
+pub mod deploy_builder;
 pub mod image_step_builder;
+pub mod install_bin_builder;
+pub mod log_collector;
+pub mod metadata;
+pub mod mise_step_builder;
 
 use std::any::Any;
 use std::collections::HashMap;
 
-use crate::app::App;
 use crate::app::environment::Environment;
+use crate::app::App;
 use crate::config::Config;
-use crate::plan::{
-    BuildPlan, Command, Filter, Layer,
-    spread, spread_strings,
-    ARCPACK_BUILDER_IMAGE,
-};
 use crate::plan::dockerignore::DockerignoreContext;
+use crate::plan::{
+    spread, spread_strings, BuildPlan, Command, Filter, Layer, Step, ARCPACK_BUILDER_IMAGE,
+};
 use crate::resolver::{ResolvedPackage, Resolver, VersionResolver};
 use crate::Result;
 
@@ -129,10 +127,8 @@ impl GenerateContext {
 
     /// 创建命名的 MiseStepBuilder（用于 Java 运行时 JDK 等场景）
     pub fn new_named_mise_step_builder(&mut self, name: &str) -> &mut MiseStepBuilder {
-        self.additional_mise_builders.push((
-            name.to_string(),
-            MiseStepBuilder::new(name, &self.config),
-        ));
+        self.additional_mise_builders
+            .push((name.to_string(), MiseStepBuilder::new(name, &self.config)));
         &mut self.additional_mise_builders.last_mut().unwrap().1
     }
 
@@ -157,7 +153,10 @@ impl GenerateContext {
 
     /// 按名称查找步骤
     pub fn get_step_by_name(&self, name: &str) -> Option<&dyn StepBuilder> {
-        self.steps.iter().find(|s| s.name() == name).map(|s| s.as_ref())
+        self.steps
+            .iter()
+            .find(|s| s.name() == name)
+            .map(|s| s.as_ref())
     }
 
     /// 创建新的 CommandStepBuilder（同名替换旧步骤）
@@ -172,7 +171,9 @@ impl GenerateContext {
 
         // 返回最后一个元素的可变引用
         let last = self.steps.last_mut().unwrap();
-        last.as_any_mut().downcast_mut::<CommandStepBuilder>().unwrap()
+        last.as_any_mut()
+            .downcast_mut::<CommandStepBuilder>()
+            .unwrap()
     }
 
     /// 创建新的 ImageStepBuilder
@@ -186,7 +187,9 @@ impl GenerateContext {
         self.steps.push(Box::new(builder));
 
         let last = self.steps.last_mut().unwrap();
-        last.as_any_mut().downcast_mut::<ImageStepBuilder>().unwrap()
+        last.as_any_mut()
+            .downcast_mut::<ImageStepBuilder>()
+            .unwrap()
     }
 
     /// 创建本地层（应用 dockerignore 过滤）
@@ -194,10 +197,16 @@ impl GenerateContext {
         let mut layer = Layer::new_local_layer();
 
         if !self.dockerignore_ctx.includes.is_empty() {
-            layer.filter.include.extend(self.dockerignore_ctx.includes.clone());
+            layer
+                .filter
+                .include
+                .extend(self.dockerignore_ctx.includes.clone());
         }
         if !self.dockerignore_ctx.excludes.is_empty() {
-            layer.filter.exclude.extend(self.dockerignore_ctx.excludes.clone());
+            layer
+                .filter
+                .exclude
+                .extend(self.dockerignore_ctx.excludes.clone());
         }
 
         layer
@@ -211,7 +220,9 @@ impl GenerateContext {
         }
 
         // 先收集包信息，避免同时借用 self.config 和 self.get_mise_step_builder()
-        let mut sorted_packages: Vec<(String, String)> = self.config.packages
+        let mut sorted_packages: Vec<(String, String)> = self
+            .config
+            .packages
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
@@ -226,10 +237,17 @@ impl GenerateContext {
         }
 
         for (pkg, version) in sorted_packages {
-            let pkg_ref = self.mise_step_builder.as_mut().unwrap()
-                .default_package(&mut self.resolver, &pkg, &version);
-            self.mise_step_builder.as_mut().unwrap()
-                .version(&mut self.resolver, &pkg_ref, &version, "custom config");
+            let pkg_ref = self.mise_step_builder.as_mut().unwrap().default_package(
+                &mut self.resolver,
+                &pkg,
+                &version,
+            );
+            self.mise_step_builder.as_mut().unwrap().version(
+                &mut self.resolver,
+                &pkg_ref,
+                &version,
+                "custom config",
+            );
         }
     }
 
@@ -261,10 +279,8 @@ impl GenerateContext {
                 deploy_config.inputs.clone(),
                 self.deploy.deploy_inputs.clone(),
             );
-            self.deploy.paths = spread_strings(
-                deploy_config.paths.clone(),
-                self.deploy.paths.clone(),
-            );
+            self.deploy.paths =
+                spread_strings(deploy_config.paths.clone(), self.deploy.paths.clone());
 
             for (k, v) in &deploy_config.variables {
                 self.deploy.variables.insert(k.clone(), v.clone());
@@ -274,29 +290,76 @@ impl GenerateContext {
         // 应用步骤配置
         let step_names: Vec<String> = {
             let mut names: Vec<String> = self.config.steps.keys().cloned().collect();
-            names.sort();
+            names.sort_by(|a, b| {
+                let priority = |name: &str| match name {
+                    "install" => 0_u8,
+                    "build" => 1_u8,
+                    _ => 2_u8,
+                };
+
+                priority(a).cmp(&priority(b)).then_with(|| a.cmp(b))
+            });
             names
         };
+        let has_install_config = self.config.steps.contains_key("install");
 
         for name in step_names {
             let config_step = self.config.steps[&name].clone();
+            let needs_local_input =
+                config_step.step.inputs.is_empty() && step_uses_local_copy(&config_step.step);
+            let local_layer = needs_local_input.then(|| self.new_local_layer());
 
             // 查找或创建 CommandStepBuilder
             let existing_idx = self.steps.iter().position(|s| s.name() == name);
 
             if let Some(idx) = existing_idx {
-                if let Some(csb) = self.steps[idx].as_any_mut().downcast_mut::<CommandStepBuilder>() {
+                if let Some(csb) = self.steps[idx]
+                    .as_any_mut()
+                    .downcast_mut::<CommandStepBuilder>()
+                {
                     csb.merge_from_config_step(&config_step.step);
+
+                    if let Some(ref layer) = local_layer {
+                        if !command_step_has_local_input(csb) {
+                            csb.add_input(layer.clone());
+                        }
+                    }
+
+                    if name == "build" && has_install_config {
+                        ensure_build_depends_on_install(csb);
+                    }
                 }
             } else {
                 // 创建新的 CommandStepBuilder
                 let mut csb = CommandStepBuilder::new(&name);
-                // 添加 mise 步骤作为输入
+                // 兼容 railpack：新建配置步骤默认至少有一个基础输入
+                // 优先依赖 mise 步骤；若不存在则退回 builder base image。
                 if let Some(ref mise) = self.mise_step_builder {
                     csb.add_input(Layer::new_step_layer(mise.name(), None));
+                } else {
+                    csb.add_input(Layer::new_image_layer(&self.base_image, None));
                 }
+
+                if let Some(ref layer) = local_layer {
+                    csb.add_input(layer.clone());
+                }
+
                 csb.merge_from_config_step(&config_step.step);
-                self.steps.push(Box::new(csb));
+
+                if name == "build" && has_install_config {
+                    ensure_build_depends_on_install(&mut csb);
+                }
+
+                // 对齐 railpack：当配置新增 install 且已有 build 时，install 应位于 build 之前。
+                if name == "install" {
+                    if let Some(build_idx) = self.steps.iter().position(|s| s.name() == "build") {
+                        self.steps.insert(build_idx, Box::new(csb));
+                    } else {
+                        self.steps.push(Box::new(csb));
+                    }
+                } else {
+                    self.steps.push(Box::new(csb));
+                }
             }
 
             // 转换 deploy outputs 为 layers
@@ -315,7 +378,8 @@ impl GenerateContext {
                     }
                 }
                 if !already_covered {
-                    self.deploy.add_inputs(&[Layer::new_step_layer(&name, Some(filter.clone()))]);
+                    self.deploy
+                        .add_inputs(&[Layer::new_step_layer(&name, Some(filter.clone()))]);
                 }
             }
         }
@@ -336,12 +400,13 @@ impl GenerateContext {
 
         // 若有 mise_step_builder，先 build 它
         if let Some(ref mise_builder) = self.mise_step_builder {
-            mise_builder.build(&mut plan, &mut options, &self.resolver, &self.app, &self.env)?;
-        }
-
-        // 构建额外的命名 mise builders（如 Java 运行时 JDK）
-        for (_, mise_builder) in &self.additional_mise_builders {
-            mise_builder.build(&mut plan, &mut options, &self.resolver, &self.app, &self.env)?;
+            mise_builder.build(
+                &mut plan,
+                &mut options,
+                &self.resolver,
+                &self.app,
+                &self.env,
+            )?;
         }
 
         // 遍历 steps，逐个 build
@@ -349,9 +414,19 @@ impl GenerateContext {
             step.build(&mut plan, &mut options)?;
         }
 
-        // 写入缓存和 secrets
-        plan.caches = options.caches.caches.clone();
+        // 构建额外的命名 mise builders（如 Java/Gleam 运行时包）。
+        // 对齐 railpack：运行时 mise 步骤应位于业务 build 之后。
+        for (_, mise_builder) in &self.additional_mise_builders {
+            mise_builder.build(
+                &mut plan,
+                &mut options,
+                &self.resolver,
+                &self.app,
+                &self.env,
+            )?;
+        }
 
+        // 写入 secrets
         let mut secrets = self.secrets.clone();
         secrets.sort();
         secrets.dedup();
@@ -360,6 +435,9 @@ impl GenerateContext {
         // 构建 deploy
         self.deploy.build(&mut plan, &mut options);
 
+        // deploy 构建阶段可能新增缓存（如 apt），需在 deploy 后回写到 plan。
+        plan.caches = options.caches.caches.clone();
+
         // 规范化
         plan.normalize();
 
@@ -367,9 +445,49 @@ impl GenerateContext {
     }
 }
 
+fn step_uses_local_copy(step: &Step) -> bool {
+    step.commands.iter().any(|cmd| {
+        matches!(
+            cmd,
+            Command::Copy(copy)
+                if copy.image.is_none()
+        )
+    })
+}
+
+fn command_step_has_local_input(csb: &CommandStepBuilder) -> bool {
+    csb.inputs.iter().any(|input| input.local == Some(true))
+}
+
+fn ensure_build_depends_on_install(csb: &mut CommandStepBuilder) {
+    let mut next_inputs = vec![Layer::new_step_layer("install", None)];
+
+    for input in &csb.inputs {
+        if input.step.as_deref() == Some("install") {
+            continue;
+        }
+
+        let keep = if input.local == Some(true) || input.image.is_some() {
+            true
+        } else if let Some(step_name) = input.step.as_deref() {
+            !step_name.starts_with("packages:")
+        } else {
+            true
+        };
+
+        if keep && !next_inputs.contains(input) {
+            next_inputs.push(input.clone());
+        }
+    }
+
+    csb.inputs = next_inputs;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::StepConfig;
+    use crate::plan::Step;
     use crate::resolver::VersionResolver;
     use tempfile::TempDir;
 
@@ -453,10 +571,49 @@ mod tests {
         step.add_input(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
 
         // 配置 deploy 引用该步骤
-        ctx.deploy.add_inputs(&[Layer::new_step_layer("install", Some(Filter::include_only(vec![".".to_string()])))]);
+        ctx.deploy.add_inputs(&[Layer::new_step_layer(
+            "install",
+            Some(Filter::include_only(vec![".".to_string()])),
+        )]);
 
         let (plan, _) = ctx.generate().unwrap();
         assert_eq!(plan.steps.len(), 1);
         assert_eq!(plan.steps[0].name, Some("install".to_string()));
+    }
+
+    #[test]
+    fn test_generate_deploy_apt_registers_top_level_caches() {
+        let (_dir, mut ctx) = make_test_ctx();
+        ctx.deploy.add_apt_packages(&["curl".to_string()]);
+
+        let (plan, _) = ctx.generate().unwrap();
+        assert!(plan.caches.contains_key("apt"));
+        assert!(plan.caches.contains_key("apt-lists"));
+    }
+
+    #[test]
+    fn test_generate_config_only_step_gets_base_image_input() {
+        let (_dir, mut ctx) = make_test_ctx();
+
+        ctx.config.steps.insert(
+            "custom".to_string(),
+            StepConfig {
+                step: Step {
+                    commands: vec![Command::new_exec("echo hi")],
+                    ..Step::new("custom")
+                },
+                ..Default::default()
+            },
+        );
+
+        let (plan, _) = ctx.generate().unwrap();
+        let custom = plan
+            .steps
+            .iter()
+            .find(|s| s.name.as_deref() == Some("custom"))
+            .expect("custom step should exist");
+
+        assert!(!custom.inputs.is_empty());
+        assert_eq!(custom.inputs[0].image.as_deref(), Some(ARCPACK_BUILDER_IMAGE));
     }
 }

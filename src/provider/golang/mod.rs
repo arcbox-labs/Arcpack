@@ -2,11 +2,10 @@
 ///
 /// 对齐 railpack `core/providers/golang/golang.go`
 /// 支持 workspace、CGO 检测、cmd/ 子目录解析。
-
 use std::collections::HashMap;
 
-use crate::app::App;
 use crate::app::environment::Environment;
+use crate::app::App;
 use crate::generate::command_step_builder::CommandStepBuilder;
 use crate::generate::mise_step_builder::{self, MiseStepBuilder};
 use crate::generate::GenerateContext;
@@ -297,10 +296,8 @@ impl Provider for GoProvider {
         }
 
         // deploy inputs: build 步骤输出
-        let build_layer = Layer::new_step_layer(
-            "build",
-            Some(Filter::include_only(vec![".".to_string()])),
-        );
+        let build_layer =
+            Layer::new_step_layer("build", Some(Filter::include_only(vec![".".to_string()])));
         ctx.deploy.add_inputs(&[build_layer]);
 
         Ok(())
@@ -461,11 +458,7 @@ mod tests {
             "module example.com/app\n\ngo 1.22",
         )
         .unwrap();
-        fs::write(
-            dir.path().join("main.go"),
-            "package main\nfunc main() {}",
-        )
-        .unwrap();
+        fs::write(dir.path().join("main.go"), "package main\nfunc main() {}").unwrap();
         let mut ctx = make_ctx(&dir);
         let mut provider = GoProvider::new();
         provider.initialize(&mut ctx).unwrap();
@@ -493,11 +486,7 @@ mod tests {
     #[test]
     fn test_plan_cgo_adds_apt_packages() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("go.mod"),
-            "module example.com/app\ngo 1.22",
-        )
-        .unwrap();
+        fs::write(dir.path().join("go.mod"), "module example.com/app\ngo 1.22").unwrap();
         fs::write(
             dir.path().join("main.go"),
             "package main\nimport \"C\"\nfunc main() {}",
@@ -525,11 +514,7 @@ mod tests {
     fn test_plan_workspace_metadata() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("go.work"), "go 1.22\nuse .").unwrap();
-        fs::write(
-            dir.path().join("go.mod"),
-            "module example.com/app\ngo 1.22",
-        )
-        .unwrap();
+        fs::write(dir.path().join("go.mod"), "module example.com/app\ngo 1.22").unwrap();
         let mut ctx = make_ctx(&dir);
         let mut provider = GoProvider::new();
         provider.initialize(&mut ctx).unwrap();
@@ -544,11 +529,7 @@ mod tests {
     #[test]
     fn test_plan_env_version_override() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("go.mod"),
-            "module example.com/app\ngo 1.22",
-        )
-        .unwrap();
+        fs::write(dir.path().join("go.mod"), "module example.com/app\ngo 1.22").unwrap();
         let mut ctx = make_ctx_with_env(
             &dir,
             HashMap::from([("ARCPACK_GO_VERSION".to_string(), "1.21".to_string())]),

@@ -92,19 +92,13 @@ pub fn build_solve_request(config: &SolveConfig) -> Result<SolveRequest> {
         }
         ExportConfig::Local { dest } => {
             let mut attrs = HashMap::new();
-            attrs.insert(
-                "dest".to_string(),
-                dest.to_string_lossy().into_owned(),
-            );
+            attrs.insert("dest".to_string(), dest.to_string_lossy().into_owned());
             ("local".to_string(), attrs)
         }
         ExportConfig::DockerTar { name, dest } => {
             let mut attrs = HashMap::new();
             attrs.insert("name".to_string(), name.clone());
-            attrs.insert(
-                "dest".to_string(),
-                dest.to_string_lossy().into_owned(),
-            );
+            attrs.insert("dest".to_string(), dest.to_string_lossy().into_owned());
             ("docker".to_string(), attrs)
         }
     };
@@ -122,8 +116,16 @@ pub fn build_solve_request(config: &SolveConfig) -> Result<SolveRequest> {
         None
     } else {
         Some(control::CacheOptions {
-            imports: config.cache_imports.iter().map(CacheConfig::to_entry).collect(),
-            exports: config.cache_exports.iter().map(CacheConfig::to_entry).collect(),
+            imports: config
+                .cache_imports
+                .iter()
+                .map(CacheConfig::to_entry)
+                .collect(),
+            exports: config
+                .cache_exports
+                .iter()
+                .map(CacheConfig::to_entry)
+                .collect(),
             ..Default::default()
         })
     };
@@ -413,5 +415,4 @@ mod tests {
         assert_eq!(cache.exports[0].r#type, "gha");
         assert_eq!(cache.exports[0].attrs.get("mode").unwrap(), "max");
     }
-
 }

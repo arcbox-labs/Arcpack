@@ -127,7 +127,11 @@ mod tests {
         let cache = Cache::new("/root/.npm");
         let spec = store.get_cache_mount_spec("npm", &cache);
         match spec {
-            MountSpec::Cache { target, cache_id, sharing } => {
+            MountSpec::Cache {
+                target,
+                cache_id,
+                sharing,
+            } => {
                 assert_eq!(target, "/root/.npm");
                 assert_eq!(cache_id, "app-npm");
                 assert!(matches!(sharing, CacheSharingMode::Shared));

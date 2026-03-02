@@ -1,7 +1,7 @@
-use crate::graph::Node;
-use crate::plan::Step;
 use super::build_env::BuildEnvironment;
 use crate::buildkit::llb::OperationOutput;
+use crate::graph::Node;
+use crate::plan::Step;
 
 /// 构建图节点 —— Step + 处理状态 + 双环境
 ///
@@ -65,7 +65,10 @@ mod tests {
         let node = StepNode::new(step);
         assert!(!node.processed, "processed should be false");
         assert!(!node.in_progress, "in_progress should be false");
-        assert!(node.dockerfile_stage.is_empty(), "dockerfile_stage should be empty");
+        assert!(
+            node.dockerfile_stage.is_empty(),
+            "dockerfile_stage should be empty"
+        );
     }
 
     #[test]
@@ -80,14 +83,21 @@ mod tests {
         // Step with no name (using Default)
         let step = Step::default();
         let node = StepNode::new(step);
-        assert_eq!(node.name(), "", "step with no name should return empty string");
+        assert_eq!(
+            node.name(),
+            "",
+            "step with no name should return empty string"
+        );
     }
 
     #[test]
     fn test_llb_state_initial_none() {
         let step = Step::new("install");
         let node = StepNode::new(step);
-        assert!(node.llb_state.is_none(), "新建 StepNode 的 llb_state 应为 None");
+        assert!(
+            node.llb_state.is_none(),
+            "新建 StepNode 的 llb_state 应为 None"
+        );
     }
 
     #[test]
@@ -106,9 +116,21 @@ mod tests {
     fn test_new_initializes_empty_environments() {
         let step = Step::new("setup");
         let node = StepNode::new(step);
-        assert!(node.input_env.path_list.is_empty(), "input_env path_list should be empty");
-        assert!(node.input_env.env_vars.is_empty(), "input_env env_vars should be empty");
-        assert!(node.output_env.path_list.is_empty(), "output_env path_list should be empty");
-        assert!(node.output_env.env_vars.is_empty(), "output_env env_vars should be empty");
+        assert!(
+            node.input_env.path_list.is_empty(),
+            "input_env path_list should be empty"
+        );
+        assert!(
+            node.input_env.env_vars.is_empty(),
+            "input_env env_vars should be empty"
+        );
+        assert!(
+            node.output_env.path_list.is_empty(),
+            "output_env path_list should be empty"
+        );
+        assert!(
+            node.output_env.env_vars.is_empty(),
+            "output_env env_vars should be empty"
+        );
     }
 }

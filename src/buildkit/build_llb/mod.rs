@@ -122,9 +122,10 @@ impl BuildGraph {
 
     /// 检查节点状态：已处理 → false，进行中 → 循环错误，待处理 → true
     fn check_node_status(&self, name: &str) -> Result<bool> {
-        let node = self.graph.get_node(name).ok_or_else(|| {
-            anyhow::anyhow!("节点未找到: {}", name)
-        })?;
+        let node = self
+            .graph
+            .get_node(name)
+            .ok_or_else(|| anyhow::anyhow!("节点未找到: {}", name))?;
         if node.processed {
             return Ok(false);
         }
@@ -191,9 +192,10 @@ impl BuildGraph {
     fn convert_node_to_dockerfile(&mut self, name: &str) -> Result<()> {
         // 提取所需数据（避免借用冲突）
         let (step, input_env) = {
-            let node = self.graph.get_node(name).ok_or_else(|| {
-                anyhow::anyhow!("节点未找到: {}", name)
-            })?;
+            let node = self
+                .graph
+                .get_node(name)
+                .ok_or_else(|| anyhow::anyhow!("节点未找到: {}", name))?;
             (node.step.clone(), node.input_env.clone())
         };
 
@@ -313,9 +315,9 @@ impl BuildGraph {
         // 缓存挂载
         for cache_key in step_caches {
             if let Some(plan_cache) = self.plan.caches.get(cache_key) {
-                let mount_opt =
-                    self.cache_store
-                        .get_cache_mount_option(cache_key, plan_cache);
+                let mount_opt = self
+                    .cache_store
+                    .get_cache_mount_option(cache_key, plan_cache);
                 mounts.push(mount_opt);
             }
         }
@@ -357,6 +359,9 @@ impl BuildGraph {
     }
 
     /// 转换 File 命令为 heredoc COPY 指令
+    ///
+    /// 当 FileCommand.mode 非空且非默认 0o644 时，添加 --chmod 标志。
+    /// 对齐 railpack: `convertFileCommandToLLB()` 默认 0o644，可设为 0o755 等。
     fn convert_file_command(
         file_cmd: &crate::plan::command::FileCommand,
         step_assets: &HashMap<String, String>,
@@ -371,9 +376,14 @@ impl BuildGraph {
         } else {
             "EOF"
         };
+        // 当 mode 非空且非默认 0o644 时，添加 --chmod
+        let chmod_flag = match file_cmd.mode {
+            Some(mode) if mode != 0o644 => format!(" --chmod={:04o}", mode),
+            _ => String::new(),
+        };
         format!(
-            "COPY <<'{}' {}\n{}\n{}",
-            delimiter, file_cmd.path, content, delimiter
+            "COPY{} <<'{}' {}\n{}\n{}",
+            chmod_flag, delimiter, file_cmd.path, content, delimiter
         )
     }
 
@@ -516,9 +526,10 @@ impl BuildGraph {
     fn do_process_node_llb(&mut self, name: &str) -> Result<()> {
         // 提取数据（避免借用冲突）
         let (step, input_env) = {
-            let node = self.graph.get_node(name).ok_or_else(|| {
-                anyhow::anyhow!("节点未找到: {}", name)
-            })?;
+            let node = self
+                .graph
+                .get_node(name)
+                .ok_or_else(|| anyhow::anyhow!("节点未找到: {}", name))?;
             (node.step.clone(), node.input_env.clone())
         };
 
@@ -554,11 +565,8 @@ impl BuildGraph {
                     current_state = Self::convert_copy_command_llb(current_state, copy_cmd);
                 }
                 Command::File(file_cmd) => {
-                    current_state = Self::convert_file_command_llb(
-                        current_state,
-                        file_cmd,
-                        &step.assets,
-                    );
+                    current_state =
+                        Self::convert_file_command_llb(current_state, file_cmd, &step.assets);
                 }
             }
         }
@@ -607,11 +615,7 @@ impl BuildGraph {
     ) -> Result<crate::buildkit::llb::OperationOutput> {
         use crate::buildkit::llb::exec::ExecBuilder;
 
-        let args = vec![
-            "/bin/sh".to_string(),
-            "-c".to_string(),
-            exec.cmd.clone(),
-        ];
+        let args = vec!["/bin/sh".to_string(), "-c".to_string(), exec.cmd.clone()];
         let mut builder = ExecBuilder::new(state, args).cwd("/app");
 
         // 注入环境变量：current_env.env_vars + step.variables
@@ -627,16 +631,18 @@ impl BuildGraph {
         let path_value = if current_env.path_list.is_empty() {
             Self::DEFAULT_SYSTEM_PATH.to_string()
         } else {
-            format!("{}:{}", current_env.path_list.join(":"), Self::DEFAULT_SYSTEM_PATH)
+            format!(
+                "{}:{}",
+                current_env.path_list.join(":"),
+                Self::DEFAULT_SYSTEM_PATH
+            )
         };
         builder = builder.env("PATH", &path_value);
 
         // 缓存挂载
         for cache_key in &step.caches {
             if let Some(plan_cache) = self.plan.caches.get(cache_key) {
-                let mount_spec =
-                    self.cache_store
-                        .get_cache_mount_spec(cache_key, plan_cache);
+                let mount_spec = self.cache_store.get_cache_mount_spec(cache_key, plan_cache);
                 builder = builder.add_mount(mount_spec);
             }
         }
@@ -758,8 +764,8 @@ impl BuildGraph {
 mod tests {
     use super::*;
     use crate::plan::{
-        BuildPlan, Command, Deploy, Filter, Layer, Step,
-        ARCPACK_BUILDER_IMAGE, ARCPACK_RUNTIME_IMAGE,
+        BuildPlan, Command, Deploy, Filter, Layer, Step, ARCPACK_BUILDER_IMAGE,
+        ARCPACK_RUNTIME_IMAGE,
     };
 
     /// 辅助函数：创建默认 Platform
@@ -780,7 +786,10 @@ mod tests {
         plan.add_step(Step::new("install"));
 
         let bg = BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
-        assert!(bg.graph.get_node("packages").is_some(), "packages 节点应存在");
+        assert!(
+            bg.graph.get_node("packages").is_some(),
+            "packages 节点应存在"
+        );
         assert!(bg.graph.get_node("install").is_some(), "install 节点应存在");
     }
 
@@ -817,17 +826,13 @@ mod tests {
 
         // install 步骤：依赖 packages
         let mut install = Step::new("install");
-        install
-            .inputs
-            .push(Layer::new_step_layer("packages", None));
+        install.inputs.push(Layer::new_step_layer("packages", None));
         install.commands.push(Command::new_exec("npm install"));
         plan.add_step(install);
 
         // build 步骤：依赖 install + local
         let mut build = Step::new("build");
-        build
-            .inputs
-            .push(Layer::new_step_layer("install", None));
+        build.inputs.push(Layer::new_step_layer("install", None));
         build.inputs.push(Layer::new_local_layer());
         build.commands.push(Command::new_exec("npm run build"));
         plan.add_step(build);
@@ -844,8 +849,7 @@ mod tests {
             paths: vec![],
         };
 
-        let mut bg =
-            BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
+        let mut bg = BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
         let output = bg.to_dockerfile().unwrap();
 
         // 验证关键内容
@@ -880,11 +884,12 @@ mod tests {
             .push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
         plan.add_step(step);
 
-        let mut bg =
-            BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
+        let mut bg = BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
         let output = bg.to_dockerfile().unwrap();
         assert!(
-            output.dockerfile.starts_with("# syntax=docker/dockerfile:1"),
+            output
+                .dockerfile
+                .starts_with("# syntax=docker/dockerfile:1"),
             "Dockerfile 应以 syntax header 开头"
         );
     }
@@ -899,8 +904,7 @@ mod tests {
         step.commands.push(Command::new_exec("apt-get update"));
         plan.add_step(step);
 
-        let mut bg =
-            BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
+        let mut bg = BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
         let output = bg.to_dockerfile().unwrap();
         assert!(
             output.dockerfile.contains("RUN apt-get update"),
@@ -915,18 +919,20 @@ mod tests {
         let mut step = Step::new("setup");
         step.inputs
             .push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
-        step.commands.push(Command::Copy(crate::plan::command::CopyCommand {
-            image: Some("golang:1.21".to_string()),
-            src: "/usr/local/go".to_string(),
-            dest: "/usr/local/go".to_string(),
-        }));
+        step.commands
+            .push(Command::Copy(crate::plan::command::CopyCommand {
+                image: Some("golang:1.21".to_string()),
+                src: "/usr/local/go".to_string(),
+                dest: "/usr/local/go".to_string(),
+            }));
         plan.add_step(step);
 
-        let mut bg =
-            BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
+        let mut bg = BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
         let output = bg.to_dockerfile().unwrap();
         assert!(
-            output.dockerfile.contains("COPY --from=golang:1.21 /usr/local/go /usr/local/go"),
+            output
+                .dockerfile
+                .contains("COPY --from=golang:1.21 /usr/local/go /usr/local/go"),
             "应包含 COPY --from 指令"
         );
     }
@@ -938,15 +944,15 @@ mod tests {
         let mut step = Step::new("setup");
         step.inputs
             .push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
-        step.commands
-            .push(Command::new_path("/usr/local/go/bin"));
+        step.commands.push(Command::new_path("/usr/local/go/bin"));
         plan.add_step(step);
 
-        let mut bg =
-            BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
+        let mut bg = BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
         let output = bg.to_dockerfile().unwrap();
         assert!(
-            output.dockerfile.contains("ENV PATH=/usr/local/go/bin:$PATH"),
+            output
+                .dockerfile
+                .contains("ENV PATH=/usr/local/go/bin:$PATH"),
             "应包含 ENV PATH 指令"
         );
     }
@@ -960,24 +966,76 @@ mod tests {
             .push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
         step.commands
             .push(Command::new_file("/etc/config.toml", "myconfig"));
-        step.assets
-            .insert("myconfig".to_string(), "[settings]\nkey = \"value\"".to_string());
+        step.assets.insert(
+            "myconfig".to_string(),
+            "[settings]\nkey = \"value\"".to_string(),
+        );
         plan.add_step(step);
 
-        let mut bg =
-            BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
+        let mut bg = BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
         let output = bg.to_dockerfile().unwrap();
         assert!(
             output.dockerfile.contains("COPY <<'EOF' /etc/config.toml"),
             "应包含 heredoc COPY 指令"
         );
-        assert!(
-            output.dockerfile.contains("[settings]"),
-            "应包含文件内容"
+        assert!(output.dockerfile.contains("[settings]"), "应包含文件内容");
+        assert!(output.dockerfile.contains("EOF"), "应包含 EOF 终止符");
+    }
+
+    // 8b. File 命令带 mode 时生成 --chmod
+    #[test]
+    fn test_file_command_with_mode_generates_chmod() {
+        let mut plan = BuildPlan::new();
+        let mut step = Step::new("entrypoint");
+        step.inputs
+            .push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
+        step.commands
+            .push(Command::File(crate::plan::command::FileCommand {
+                path: "/entrypoint.sh".to_string(),
+                name: "entrypoint".to_string(),
+                mode: Some(0o755),
+                custom_name: None,
+            }));
+        step.assets.insert(
+            "entrypoint".to_string(),
+            "#!/bin/bash\nexec \"$@\"".to_string(),
         );
+        plan.add_step(step);
+
+        let mut bg = BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
+        let output = bg.to_dockerfile().unwrap();
         assert!(
-            output.dockerfile.contains("EOF"),
-            "应包含 EOF 终止符"
+            output
+                .dockerfile
+                .contains("COPY --chmod=0755 <<'EOF' /entrypoint.sh"),
+            "带 mode 的 File 命令应生成 --chmod 标志，实际: {}",
+            output.dockerfile
+        );
+    }
+
+    // 8c. File 命令默认 mode (0o644) 不生成 --chmod
+    #[test]
+    fn test_file_command_default_mode_no_chmod() {
+        let mut plan = BuildPlan::new();
+        let mut step = Step::new("config");
+        step.inputs
+            .push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
+        step.commands
+            .push(Command::File(crate::plan::command::FileCommand {
+                path: "/etc/config.toml".to_string(),
+                name: "myconfig".to_string(),
+                mode: Some(0o644),
+                custom_name: None,
+            }));
+        step.assets
+            .insert("myconfig".to_string(), "key = \"value\"".to_string());
+        plan.add_step(step);
+
+        let mut bg = BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
+        let output = bg.to_dockerfile().unwrap();
+        assert!(
+            !output.dockerfile.contains("--chmod"),
+            "默认 mode 0o644 不应生成 --chmod 标志"
         );
     }
 
@@ -1000,8 +1058,7 @@ mod tests {
         child.commands.push(Command::new_exec("echo hello"));
         plan.add_step(child);
 
-        let mut bg =
-            BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
+        let mut bg = BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
         let output = bg.to_dockerfile().unwrap();
 
         // 在 child 阶段中应能看到父节点传播的 PATH
@@ -1031,8 +1088,7 @@ mod tests {
             paths: vec![],
         };
 
-        let mut bg =
-            BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
+        let mut bg = BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
         let output = bg.to_dockerfile().unwrap();
         assert!(
             output.dockerfile.contains(r#"CMD ["node server.js"]"#),
@@ -1057,8 +1113,7 @@ mod tests {
             paths: vec![],
         };
 
-        let mut bg =
-            BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
+        let mut bg = BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
         let output = bg.to_dockerfile().unwrap();
         assert!(
             output.dockerfile.contains(r#"CMD ["/bin/bash"]"#),
@@ -1081,8 +1136,7 @@ mod tests {
         );
         plan.add_step(step);
 
-        let mut bg =
-            BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
+        let mut bg = BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
         let output = bg.to_dockerfile().unwrap();
         assert!(
             output.dockerfile.contains("ARCPACK_FILE_END"),
@@ -1111,7 +1165,8 @@ mod tests {
         #[test]
         fn test_process_node_llb_sets_state() {
             let mut step = Step::new("install");
-            step.inputs.push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
+            step.inputs
+                .push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
             step.commands.push(Command::new_exec("npm install"));
 
             let mut bg = build_single_step_graph(step);
@@ -1128,7 +1183,9 @@ mod tests {
 
             // 父节点设置 PATH
             let mut parent = Step::new("parent");
-            parent.inputs.push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
+            parent
+                .inputs
+                .push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
             parent.commands.push(Command::new_path("/custom/bin"));
             plan.add_step(parent);
 
@@ -1138,13 +1195,17 @@ mod tests {
             child.commands.push(Command::new_exec("echo hello"));
             plan.add_step(child);
 
-            let mut bg = BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
+            let mut bg =
+                BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
             bg.process_node_llb("parent").unwrap();
             bg.process_node_llb("child").unwrap();
 
             let child_node = bg.graph.get_node("child").unwrap();
             assert!(
-                child_node.output_env.path_list.contains(&"/custom/bin".to_string()),
+                child_node
+                    .output_env
+                    .path_list
+                    .contains(&"/custom/bin".to_string()),
                 "子节点应继承父节点的 PATH"
             );
         }
@@ -1160,7 +1221,8 @@ mod tests {
             step_b.inputs.push(Layer::new_step_layer("a", None));
             plan.add_step(step_b);
 
-            let mut bg = BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
+            let mut bg =
+                BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
             // 手动设置 in_progress 模拟循环
             if let Some(node) = bg.graph.get_node_mut("b") {
                 node.in_progress = true;
@@ -1172,7 +1234,8 @@ mod tests {
         #[test]
         fn test_exec_llb_basic_args() {
             let mut step = Step::new("install");
-            step.inputs.push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
+            step.inputs
+                .push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
             step.commands.push(Command::new_exec("npm install"));
 
             let mut bg = build_single_step_graph(step);
@@ -1180,9 +1243,8 @@ mod tests {
 
             let node = bg.graph.get_node("install").unwrap();
             let state = node.get_llb_state().unwrap();
-            let op = crate::buildkit::proto::pb::Op::decode(
-                state.serialized_op.bytes.as_slice()
-            ).unwrap();
+            let op = crate::buildkit::proto::pb::Op::decode(state.serialized_op.bytes.as_slice())
+                .unwrap();
             if let Some(crate::buildkit::proto::pb::op::Op::Exec(exec_op)) = &op.op {
                 let meta = exec_op.meta.as_ref().unwrap();
                 assert_eq!(meta.args, vec!["/bin/sh", "-c", "npm install"]);
@@ -1195,8 +1257,10 @@ mod tests {
         #[test]
         fn test_exec_llb_env_vars() {
             let mut step = Step::new("build");
-            step.inputs.push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
-            step.variables.insert("NODE_ENV".to_string(), "production".to_string());
+            step.inputs
+                .push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
+            step.variables
+                .insert("NODE_ENV".to_string(), "production".to_string());
             step.commands.push(Command::new_exec("npm run build"));
 
             let mut bg = build_single_step_graph(step);
@@ -1204,9 +1268,8 @@ mod tests {
 
             let node = bg.graph.get_node("build").unwrap();
             let state = node.get_llb_state().unwrap();
-            let op = crate::buildkit::proto::pb::Op::decode(
-                state.serialized_op.bytes.as_slice()
-            ).unwrap();
+            let op = crate::buildkit::proto::pb::Op::decode(state.serialized_op.bytes.as_slice())
+                .unwrap();
             if let Some(crate::buildkit::proto::pb::op::Op::Exec(exec_op)) = &op.op {
                 let meta = exec_op.meta.as_ref().unwrap();
                 assert!(
@@ -1222,28 +1285,28 @@ mod tests {
         fn test_exec_llb_path_env() {
             let mut plan = BuildPlan::new();
             let mut step = Step::new("setup");
-            step.inputs.push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
+            step.inputs
+                .push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
             step.commands.push(Command::new_path("/custom/bin"));
             step.commands.push(Command::new_exec("echo test"));
             plan.add_step(step);
 
-            let mut bg = BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
+            let mut bg =
+                BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
             bg.process_node_llb("setup").unwrap();
 
             let node = bg.graph.get_node("setup").unwrap();
             let state = node.get_llb_state().unwrap();
-            let op = crate::buildkit::proto::pb::Op::decode(
-                state.serialized_op.bytes.as_slice()
-            ).unwrap();
+            let op = crate::buildkit::proto::pb::Op::decode(state.serialized_op.bytes.as_slice())
+                .unwrap();
             if let Some(crate::buildkit::proto::pb::op::Op::Exec(exec_op)) = &op.op {
                 let meta = exec_op.meta.as_ref().unwrap();
-                let path_env = meta.env.iter()
+                let path_env = meta
+                    .env
+                    .iter()
                     .find(|e| e.starts_with("PATH="))
                     .expect("应有 PATH 环境变量");
-                assert!(
-                    path_env.contains("/custom/bin"),
-                    "PATH 应包含 /custom/bin"
-                );
+                assert!(path_env.contains("/custom/bin"), "PATH 应包含 /custom/bin");
                 assert!(
                     path_env.contains("/usr/local/bin"),
                     "PATH 应包含系统默认路径"
@@ -1256,10 +1319,12 @@ mod tests {
         #[test]
         fn test_exec_llb_cache_mount() {
             let mut plan = BuildPlan::new();
-            plan.caches.insert("npm".to_string(), Cache::new("/root/.npm"));
+            plan.caches
+                .insert("npm".to_string(), Cache::new("/root/.npm"));
 
             let mut step = Step::new("install");
-            step.inputs.push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
+            step.inputs
+                .push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
             step.caches.push("npm".to_string());
             step.commands.push(Command::new_exec("npm install"));
             plan.add_step(step);
@@ -1269,18 +1334,23 @@ mod tests {
                 BuildKitCacheStore::new("test"),
                 None,
                 default_platform(),
-            ).unwrap();
+            )
+            .unwrap();
             bg.process_node_llb("install").unwrap();
 
             let node = bg.graph.get_node("install").unwrap();
             let state = node.get_llb_state().unwrap();
-            let op = crate::buildkit::proto::pb::Op::decode(
-                state.serialized_op.bytes.as_slice()
-            ).unwrap();
+            let op = crate::buildkit::proto::pb::Op::decode(state.serialized_op.bytes.as_slice())
+                .unwrap();
             if let Some(crate::buildkit::proto::pb::op::Op::Exec(exec_op)) = &op.op {
                 // rootfs mount + cache mount = 2
-                assert!(exec_op.mounts.len() >= 2, "应有至少 2 个 mount（rootfs + cache）");
-                let cache_mount = exec_op.mounts.iter()
+                assert!(
+                    exec_op.mounts.len() >= 2,
+                    "应有至少 2 个 mount（rootfs + cache）"
+                );
+                let cache_mount = exec_op
+                    .mounts
+                    .iter()
                     .find(|m| m.mount_type == crate::buildkit::proto::pb::MountType::Cache as i32)
                     .expect("应有 Cache mount");
                 assert_eq!(cache_mount.dest, "/root/.npm");
@@ -1295,19 +1365,20 @@ mod tests {
             plan.secrets.push("MY_TOKEN".to_string());
 
             let mut step = Step::new("deploy");
-            step.inputs.push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
+            step.inputs
+                .push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
             // 默认 secrets = ["*"]
             step.commands.push(Command::new_exec("deploy"));
             plan.add_step(step);
 
-            let mut bg = BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
+            let mut bg =
+                BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
             bg.process_node_llb("deploy").unwrap();
 
             let node = bg.graph.get_node("deploy").unwrap();
             let state = node.get_llb_state().unwrap();
-            let op = crate::buildkit::proto::pb::Op::decode(
-                state.serialized_op.bytes.as_slice()
-            ).unwrap();
+            let op = crate::buildkit::proto::pb::Op::decode(state.serialized_op.bytes.as_slice())
+                .unwrap();
             if let Some(crate::buildkit::proto::pb::op::Op::Exec(exec_op)) = &op.op {
                 assert_eq!(exec_op.secretenv.len(), 1, "应有 1 个 secret env");
                 assert_eq!(exec_op.secretenv[0].id, "MY_TOKEN");
@@ -1324,19 +1395,20 @@ mod tests {
             plan.secrets.push("SECRET_B".to_string());
 
             let mut step = Step::new("run");
-            step.inputs.push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
+            step.inputs
+                .push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
             // 默认 secrets = ["*"]，会展开为所有 plan secrets
             step.commands.push(Command::new_exec("run"));
             plan.add_step(step);
 
-            let mut bg = BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
+            let mut bg =
+                BuildGraph::new(plan, empty_cache_store(), None, default_platform()).unwrap();
             bg.process_node_llb("run").unwrap();
 
             let node = bg.graph.get_node("run").unwrap();
             let state = node.get_llb_state().unwrap();
-            let op = crate::buildkit::proto::pb::Op::decode(
-                state.serialized_op.bytes.as_slice()
-            ).unwrap();
+            let op = crate::buildkit::proto::pb::Op::decode(state.serialized_op.bytes.as_slice())
+                .unwrap();
             if let Some(crate::buildkit::proto::pb::op::Op::Exec(exec_op)) = &op.op {
                 assert_eq!(exec_op.secretenv.len(), 2, "* 应展开为 2 个 secrets");
             } else {
@@ -1350,7 +1422,8 @@ mod tests {
             plan.secrets.push("TOKEN".to_string());
 
             let mut step = Step::new("run");
-            step.inputs.push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
+            step.inputs
+                .push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
             step.commands.push(Command::new_exec("run"));
             plan.add_step(step);
 
@@ -1359,14 +1432,14 @@ mod tests {
                 empty_cache_store(),
                 Some("abc123".to_string()),
                 default_platform(),
-            ).unwrap();
+            )
+            .unwrap();
             bg.process_node_llb("run").unwrap();
 
             let node = bg.graph.get_node("run").unwrap();
             let state = node.get_llb_state().unwrap();
-            let op = crate::buildkit::proto::pb::Op::decode(
-                state.serialized_op.bytes.as_slice()
-            ).unwrap();
+            let op = crate::buildkit::proto::pb::Op::decode(state.serialized_op.bytes.as_slice())
+                .unwrap();
             if let Some(crate::buildkit::proto::pb::op::Op::Exec(exec_op)) = &op.op {
                 let meta = exec_op.meta.as_ref().unwrap();
                 assert!(
@@ -1381,34 +1454,39 @@ mod tests {
         #[test]
         fn test_copy_llb_from_image() {
             let mut step = Step::new("setup");
-            step.inputs.push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
-            step.commands.push(Command::Copy(crate::plan::command::CopyCommand {
-                image: Some("golang:1.21".to_string()),
-                src: "/usr/local/go".to_string(),
-                dest: "/usr/local/go".to_string(),
-            }));
+            step.inputs
+                .push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
+            step.commands
+                .push(Command::Copy(crate::plan::command::CopyCommand {
+                    image: Some("golang:1.21".to_string()),
+                    src: "/usr/local/go".to_string(),
+                    dest: "/usr/local/go".to_string(),
+                }));
 
             let mut bg = build_single_step_graph(step);
             bg.process_node_llb("setup").unwrap();
 
             let node = bg.graph.get_node("setup").unwrap();
             let state = node.get_llb_state().unwrap();
-            let op = crate::buildkit::proto::pb::Op::decode(
-                state.serialized_op.bytes.as_slice()
-            ).unwrap();
-            assert!(matches!(op.op, Some(crate::buildkit::proto::pb::op::Op::File(_))),
-                "Copy 命令应生成 FileOp");
+            let op = crate::buildkit::proto::pb::Op::decode(state.serialized_op.bytes.as_slice())
+                .unwrap();
+            assert!(
+                matches!(op.op, Some(crate::buildkit::proto::pb::op::Op::File(_))),
+                "Copy 命令应生成 FileOp"
+            );
         }
 
         #[test]
         fn test_copy_llb_from_local() {
             let mut step = Step::new("setup");
-            step.inputs.push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
-            step.commands.push(Command::Copy(crate::plan::command::CopyCommand {
-                image: None,
-                src: "package.json".to_string(),
-                dest: "/app/package.json".to_string(),
-            }));
+            step.inputs
+                .push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
+            step.commands
+                .push(Command::Copy(crate::plan::command::CopyCommand {
+                    image: None,
+                    src: "package.json".to_string(),
+                    dest: "/app/package.json".to_string(),
+                }));
 
             let mut bg = build_single_step_graph(step);
             bg.process_node_llb("setup").unwrap();
@@ -1420,23 +1498,25 @@ mod tests {
         #[test]
         fn test_file_llb_content_and_mode() {
             let mut step = Step::new("config");
-            step.inputs.push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
-            step.commands.push(Command::File(crate::plan::command::FileCommand {
-                path: "/app/config.toml".to_string(),
-                name: "config".to_string(),
-                mode: Some(0o755),
-                custom_name: None,
-            }));
-            step.assets.insert("config".to_string(), "key = \"value\"".to_string());
+            step.inputs
+                .push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
+            step.commands
+                .push(Command::File(crate::plan::command::FileCommand {
+                    path: "/app/config.toml".to_string(),
+                    name: "config".to_string(),
+                    mode: Some(0o755),
+                    custom_name: None,
+                }));
+            step.assets
+                .insert("config".to_string(), "key = \"value\"".to_string());
 
             let mut bg = build_single_step_graph(step);
             bg.process_node_llb("config").unwrap();
 
             let node = bg.graph.get_node("config").unwrap();
             let state = node.get_llb_state().unwrap();
-            let op = crate::buildkit::proto::pb::Op::decode(
-                state.serialized_op.bytes.as_slice()
-            ).unwrap();
+            let op = crate::buildkit::proto::pb::Op::decode(state.serialized_op.bytes.as_slice())
+                .unwrap();
             if let Some(crate::buildkit::proto::pb::op::Op::File(file_op)) = &op.op {
                 if let Some(crate::buildkit::proto::pb::file_action::Action::Mkfile(mkfile)) =
                     &file_op.actions[0].action
@@ -1459,7 +1539,9 @@ mod tests {
             let mut plan = BuildPlan::new();
 
             let mut packages = Step::new("packages");
-            packages.inputs.push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
+            packages
+                .inputs
+                .push(Layer::new_image_layer(ARCPACK_BUILDER_IMAGE, None));
             plan.add_step(packages);
 
             let mut install = Step::new("install");
@@ -1559,7 +1641,10 @@ mod tests {
             };
             let mut bg = build_full_plan_llb(deploy);
             let (def, _env) = bg.to_llb().unwrap();
-            assert!(!def.def.is_empty(), "有 filter 的 deploy 也应生成非空 Definition");
+            assert!(
+                !def.def.is_empty(),
+                "有 filter 的 deploy 也应生成非空 Definition"
+            );
         }
 
         #[test]
@@ -1581,9 +1666,8 @@ mod tests {
             assert!(!encoded.is_empty(), "序列化后的 Definition 不应为空");
 
             // 验证可反序列化
-            let decoded = crate::buildkit::proto::pb::Definition::decode(
-                encoded.as_slice()
-            ).unwrap();
+            let decoded =
+                crate::buildkit::proto::pb::Definition::decode(encoded.as_slice()).unwrap();
             assert_eq!(decoded.def.len(), def.def.len());
         }
     }

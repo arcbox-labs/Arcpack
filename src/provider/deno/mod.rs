@@ -1,10 +1,9 @@
+use crate::app::environment::Environment;
 /// Deno Provider：deno.json/deno.jsonc 检测 + deno cache/run
 ///
 /// 对齐 railpack `core/providers/deno/deno.go`
 /// 自动检测主文件，支持 ARCPACK_DENO_VERSION 版本覆盖。
-
 use crate::app::App;
-use crate::app::environment::Environment;
 use crate::generate::command_step_builder::CommandStepBuilder;
 use crate::generate::mise_step_builder::{self, MiseStepBuilder};
 use crate::generate::GenerateContext;
@@ -16,9 +15,7 @@ use crate::Result;
 const DEFAULT_DENO_VERSION: &str = "2";
 
 /// 主文件搜索优先级
-const MAIN_FILE_CANDIDATES: &[&str] = &[
-    "main.ts", "main.js", "main.mjs", "main.mts",
-];
+const MAIN_FILE_CANDIDATES: &[&str] = &["main.ts", "main.js", "main.mjs", "main.mts"];
 
 /// Deno Provider
 pub struct DenoProvider {
@@ -134,8 +131,7 @@ impl Provider for DenoProvider {
 
         // === Deploy 配置 ===
         if let Some(ref main_file) = self.main_file {
-            ctx.deploy.start_cmd =
-                Some(format!("deno run --allow-all {}", main_file));
+            ctx.deploy.start_cmd = Some(format!("deno run --allow-all {}", main_file));
         }
 
         // deploy inputs: mise 层 + build 步骤输出
@@ -145,10 +141,8 @@ impl Provider for DenoProvider {
             .map(|m| m.get_layer())
             .unwrap_or_default();
 
-        let build_layer = Layer::new_step_layer(
-            "build",
-            Some(Filter::include_only(vec![".".to_string()])),
-        );
+        let build_layer =
+            Layer::new_step_layer("build", Some(Filter::include_only(vec![".".to_string()])));
 
         ctx.deploy.add_inputs(&[mise_layer, build_layer]);
 
@@ -237,7 +231,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("main.ts"), "console.log('hi')").unwrap();
         let app = App::new(dir.path().to_str().unwrap()).unwrap();
-        assert_eq!(DenoProvider::find_main_file(&app), Some("main.ts".to_string()));
+        assert_eq!(
+            DenoProvider::find_main_file(&app),
+            Some("main.ts".to_string())
+        );
     }
 
     #[test]
@@ -245,7 +242,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("main.js"), "console.log('hi')").unwrap();
         let app = App::new(dir.path().to_str().unwrap()).unwrap();
-        assert_eq!(DenoProvider::find_main_file(&app), Some("main.js".to_string()));
+        assert_eq!(
+            DenoProvider::find_main_file(&app),
+            Some("main.js".to_string())
+        );
     }
 
     #[test]
@@ -253,7 +253,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("app.ts"), "console.log('hi')").unwrap();
         let app = App::new(dir.path().to_str().unwrap()).unwrap();
-        assert_eq!(DenoProvider::find_main_file(&app), Some("app.ts".to_string()));
+        assert_eq!(
+            DenoProvider::find_main_file(&app),
+            Some("app.ts".to_string())
+        );
     }
 
     #[test]

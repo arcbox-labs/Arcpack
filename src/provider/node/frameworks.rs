@@ -1,11 +1,10 @@
+use super::package_json::PackageJson;
+use crate::app::environment::Environment;
 /// Node.js 框架检测模块
 ///
 /// 对齐 railpack `core/providers/node/frameworks.go`
 /// 检测 12 种主流框架，决定部署模式（SSR 进程 vs SPA 静态）
-
 use crate::app::App;
-use crate::app::environment::Environment;
-use super::package_json::PackageJson;
 
 /// 部署模式
 #[derive(Debug, Clone, PartialEq)]
@@ -263,8 +262,7 @@ fn detect_react_router(app: &App, pkg: &PackageJson, pkg_path: &str) -> Option<F
 
 /// 读取 React Router 配置中的 buildDirectory
 fn read_react_router_build_dir(app: &App) -> Option<String> {
-    let build_dir_regex =
-        regex::Regex::new(r#"buildDirectory\s*:\s*['"]([^'"]+)['"]"#).unwrap();
+    let build_dir_regex = regex::Regex::new(r#"buildDirectory\s*:\s*['"]([^'"]+)['"]"#).unwrap();
     for config_file in [
         "react-router.config.ts",
         "react-router.config.js",
@@ -282,7 +280,12 @@ fn read_react_router_build_dir(app: &App) -> Option<String> {
 /// 检测 Vite（SSR 或 SPA）
 ///
 /// SvelteKit 使用 vite，但不应被归类为 Vite SPA
-fn detect_vite(app: &App, pkg: &PackageJson, no_spa: bool, pkg_path: &str) -> Option<FrameworkInfo> {
+fn detect_vite(
+    app: &App,
+    pkg: &PackageJson,
+    no_spa: bool,
+    pkg_path: &str,
+) -> Option<FrameworkInfo> {
     if !pkg.has_dependency("vite") {
         return None;
     }
@@ -300,7 +303,9 @@ fn detect_vite(app: &App, pkg: &PackageJson, no_spa: bool, pkg_path: &str) -> Op
 
     // 检查是否有 SSR 配置
     let ssr_regex = regex::Regex::new(r#"ssr\s*:\s*\{"#).unwrap();
-    let has_ssr = !app.find_files_with_content("vite.config.*", &ssr_regex).is_empty();
+    let has_ssr = !app
+        .find_files_with_content("vite.config.*", &ssr_regex)
+        .is_empty();
 
     if has_ssr {
         return Some(FrameworkInfo {
@@ -422,8 +427,8 @@ fn read_angular_output_path(app: &App) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::collections::HashMap;
+    use tempfile::TempDir;
 
     fn make_app(dir: &TempDir) -> App {
         App::new(dir.path().to_str().unwrap()).unwrap()
@@ -465,7 +470,10 @@ mod tests {
         let fw = detect_nuxt(&pkg).unwrap();
         assert_eq!(fw.name, "nuxt");
         assert_eq!(fw.mode, DeployMode::Ssr);
-        assert_eq!(fw.start_cmd, Some("node .output/server/index.mjs".to_string()));
+        assert_eq!(
+            fw.start_cmd,
+            Some("node .output/server/index.mjs".to_string())
+        );
     }
 
     #[test]
@@ -492,7 +500,8 @@ mod tests {
         )
         .unwrap();
         let app = make_app(&dir);
-        let pkg = make_pkg(r#"{"dependencies": {"vite": "5.0.0"}, "scripts": {"build": "vite build"}}"#);
+        let pkg =
+            make_pkg(r#"{"dependencies": {"vite": "5.0.0"}, "scripts": {"build": "vite build"}}"#);
         let fw = detect_vite(&app, &pkg, false, "").unwrap();
         assert_eq!(fw.name, "vite");
         assert_eq!(fw.mode, DeployMode::Spa);
@@ -508,7 +517,8 @@ mod tests {
         )
         .unwrap();
         let app = make_app(&dir);
-        let pkg = make_pkg(r#"{"dependencies": {"vite": "5.0.0"}, "scripts": {"build": "vite build"}}"#);
+        let pkg =
+            make_pkg(r#"{"dependencies": {"vite": "5.0.0"}, "scripts": {"build": "vite build"}}"#);
         let fw = detect_vite(&app, &pkg, false, "").unwrap();
         assert_eq!(fw.output_dir, Some("public".to_string()));
     }
@@ -619,9 +629,8 @@ mod tests {
         std::fs::write(dir.path().join("vite.config.ts"), r#"export default {}"#).unwrap();
         let app = make_app(&dir);
         let env = make_env(&[("ARCPACK_NO_SPA", "true")]);
-        let pkg = make_pkg(
-            r#"{"dependencies": {"vite": "5.0.0"}, "scripts": {"build": "vite build"}}"#,
-        );
+        let pkg =
+            make_pkg(r#"{"dependencies": {"vite": "5.0.0"}, "scripts": {"build": "vite build"}}"#);
         let frameworks = detect_frameworks(&app, &env, &pkg, "");
         assert!(
             frameworks.iter().all(|fw| fw.mode != DeployMode::Spa),

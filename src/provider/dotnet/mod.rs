@@ -2,11 +2,10 @@
 ///
 /// 对齐 railpack `core/providers/dotnet/dotnet.go`
 /// 支持 TargetFramework 版本解析、global.json SDK 版本、NuGet restore。
-
 use regex::Regex;
 
-use crate::app::App;
 use crate::app::environment::Environment;
+use crate::app::App;
 use crate::generate::command_step_builder::CommandStepBuilder;
 use crate::generate::mise_step_builder::{self, MiseStepBuilder};
 use crate::generate::GenerateContext;
@@ -39,15 +38,14 @@ impl DotnetProvider {
     /// 从 TargetFramework 或 TargetFrameworks（复数）提取 .NET 版本
     fn parse_target_framework(content: &str) -> Option<String> {
         // 单一目标框架
-        let re = Regex::new(r"<TargetFramework>(?:net|netcoreapp)(\d+\.\d+)</TargetFramework>")
-            .ok()?;
+        let re =
+            Regex::new(r"<TargetFramework>(?:net|netcoreapp)(\d+\.\d+)</TargetFramework>").ok()?;
         if let Some(caps) = re.captures(content) {
             return caps.get(1).map(|m| m.as_str().to_string());
         }
 
         // 多目标框架（分号分隔，取第一个）
-        let re_plural =
-            Regex::new(r"<TargetFrameworks>([^<]+)</TargetFrameworks>").ok()?;
+        let re_plural = Regex::new(r"<TargetFrameworks>([^<]+)</TargetFrameworks>").ok()?;
         if let Some(caps) = re_plural.captures(content) {
             let frameworks = caps.get(1)?.as_str();
             let first = frameworks.split(';').next()?;
@@ -151,10 +149,7 @@ impl Provider for DotnetProvider {
     }
 
     fn plan(&self, ctx: &mut GenerateContext) -> Result<()> {
-        let project_name = self
-            .project_name
-            .as_deref()
-            .unwrap_or("app");
+        let project_name = self.project_name.as_deref().unwrap_or("app");
 
         // 元数据
         ctx.metadata.set("dotnetVersion", &self.dotnet_version);
@@ -166,12 +161,7 @@ impl Provider for DotnetProvider {
         let dotnet_ref = {
             let mise = ctx.mise_step_builder.as_mut().unwrap();
             let r = mise.default_package(&mut ctx.resolver, "dotnet", DEFAULT_DOTNET_VERSION);
-            mise.version(
-                &mut ctx.resolver,
-                &r,
-                &self.dotnet_version,
-                "resolved",
-            );
+            mise.version(&mut ctx.resolver, &r, &self.dotnet_version, "resolved");
             r
         };
         let _ = dotnet_ref;
@@ -236,18 +226,15 @@ impl Provider for DotnetProvider {
             "ASPNETCORE_ENVIRONMENT".to_string(),
             "Production".to_string(),
         );
-        ctx.deploy.variables.insert(
-            "DOTNET_CLI_TELEMETRY_OPTOUT".to_string(),
-            "1".to_string(),
-        );
-        ctx.deploy.variables.insert(
-            "DOTNET_NOLOGO".to_string(),
-            "1".to_string(),
-        );
-        ctx.deploy.variables.insert(
-            "ASPNETCORE_CONTENTROOT".to_string(),
-            "/app/out".to_string(),
-        );
+        ctx.deploy
+            .variables
+            .insert("DOTNET_CLI_TELEMETRY_OPTOUT".to_string(), "1".to_string());
+        ctx.deploy
+            .variables
+            .insert("DOTNET_NOLOGO".to_string(), "1".to_string());
+        ctx.deploy
+            .variables
+            .insert("ASPNETCORE_CONTENTROOT".to_string(), "/app/out".to_string());
 
         // 运行时 APT 包
         ctx.deploy.add_apt_packages(&["libicu-dev".to_string()]);
@@ -259,10 +246,8 @@ impl Provider for DotnetProvider {
             .map(|m| m.get_layer())
             .unwrap_or_default();
 
-        let build_layer = Layer::new_step_layer(
-            "build",
-            Some(Filter::include_only(vec![".".to_string()])),
-        );
+        let build_layer =
+            Layer::new_step_layer("build", Some(Filter::include_only(vec![".".to_string()])));
 
         ctx.deploy.add_inputs(&[mise_layer, build_layer]);
 
@@ -370,7 +355,10 @@ mod tests {
 
     #[test]
     fn test_extract_project_name() {
-        assert_eq!(DotnetProvider::extract_project_name("MyApp.csproj"), "MyApp");
+        assert_eq!(
+            DotnetProvider::extract_project_name("MyApp.csproj"),
+            "MyApp"
+        );
         assert_eq!(
             DotnetProvider::extract_project_name("src/WebApi.csproj"),
             "WebApi"
@@ -434,10 +422,18 @@ mod tests {
         assert!(step_names.contains(&"install"));
         assert!(step_names.contains(&"build"));
 
-        assert!(ctx.deploy.start_cmd.as_deref().unwrap().contains("out/MyApp"));
+        assert!(ctx
+            .deploy
+            .start_cmd
+            .as_deref()
+            .unwrap()
+            .contains("out/MyApp"));
         assert!(ctx.deploy.apt_packages.contains(&"libicu-dev".to_string()));
         assert_eq!(
-            ctx.deploy.variables.get("ASPNETCORE_ENVIRONMENT").map(|s| s.as_str()),
+            ctx.deploy
+                .variables
+                .get("ASPNETCORE_ENVIRONMENT")
+                .map(|s| s.as_str()),
             Some("Production")
         );
         assert!(ctx.caches.get_cache("nuget-packages").is_some());

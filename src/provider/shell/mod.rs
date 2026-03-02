@@ -1,10 +1,9 @@
+use crate::app::environment::Environment;
 /// Shell Provider：可执行脚本支持
 ///
 /// 对齐 railpack `core/providers/shell/shell.go`
 /// 自动检测 shebang 确定解释器，支持 ARCPACK_SHELL_SCRIPT 指定自定义脚本。
-
 use crate::app::App;
-use crate::app::environment::Environment;
 use crate::generate::command_step_builder::CommandStepBuilder;
 use crate::generate::mise_step_builder::{self, MiseStepBuilder};
 use crate::generate::GenerateContext;
@@ -115,12 +114,9 @@ impl Provider for ShellProvider {
         // 确定脚本名
         if let (Some(script), var_name) = ctx.env.get_config_variable("SHELL_SCRIPT") {
             if !ctx.app.has_file(&script) {
-                return Err(anyhow::anyhow!(
-                    "{} 指定的脚本文件 '{}' 不存在",
-                    var_name,
-                    script
-                )
-                .into());
+                return Err(
+                    anyhow::anyhow!("{} 指定的脚本文件 '{}' 不存在", var_name, script).into(),
+                );
             }
             self.script_name = script;
         }
@@ -154,10 +150,7 @@ impl Provider for ShellProvider {
             let local_layer = ctx.new_local_layer();
             let build = Self::get_command_step(&mut ctx.steps, "build");
             build.add_input(local_layer);
-            build.add_command(Command::new_exec(format!(
-                "chmod +x {}",
-                self.script_name
-            )));
+            build.add_command(Command::new_exec(format!("chmod +x {}", self.script_name)));
         }
 
         // Deploy 配置
@@ -175,10 +168,8 @@ impl Provider for ShellProvider {
             .map(|m| m.get_layer())
             .unwrap_or_default();
 
-        let build_layer = Layer::new_step_layer(
-            "build",
-            Some(Filter::include_only(vec![".".to_string()])),
-        );
+        let build_layer =
+            Layer::new_step_layer("build", Some(Filter::include_only(vec![".".to_string()])));
 
         ctx.deploy.add_inputs(&[mise_layer, build_layer]);
 
@@ -314,10 +305,7 @@ mod tests {
 
     #[test]
     fn test_parse_shebang_fish_fallback() {
-        assert_eq!(
-            ShellProvider::parse_shebang("#!/bin/fish\necho hi"),
-            "bash"
-        );
+        assert_eq!(ShellProvider::parse_shebang("#!/bin/fish\necho hi"), "bash");
     }
 
     #[test]
@@ -387,16 +375,10 @@ mod tests {
         assert!(step_names.contains(&"build"));
 
         // 验证 start_cmd
-        assert_eq!(
-            ctx.deploy.start_cmd.as_deref(),
-            Some("bash start.sh")
-        );
+        assert_eq!(ctx.deploy.start_cmd.as_deref(), Some("bash start.sh"));
 
         // 验证 metadata
-        assert_eq!(
-            ctx.metadata.get("detectedShellInterpreter"),
-            Some("bash")
-        );
+        assert_eq!(ctx.metadata.get("detectedShellInterpreter"), Some("bash"));
     }
 
     #[test]
@@ -409,10 +391,7 @@ mod tests {
         provider.plan(&mut ctx).unwrap();
 
         assert!(ctx.deploy.apt_packages.contains(&"zsh".to_string()));
-        assert_eq!(
-            ctx.deploy.start_cmd.as_deref(),
-            Some("zsh start.sh")
-        );
+        assert_eq!(ctx.deploy.start_cmd.as_deref(), Some("zsh start.sh"));
     }
 
     #[test]
@@ -424,9 +403,6 @@ mod tests {
         provider.initialize(&mut ctx).unwrap();
         provider.plan(&mut ctx).unwrap();
 
-        assert_eq!(
-            ctx.deploy.start_cmd.as_deref(),
-            Some("sh start.sh")
-        );
+        assert_eq!(ctx.deploy.start_cmd.as_deref(), Some("sh start.sh"));
     }
 }

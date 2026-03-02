@@ -1,9 +1,8 @@
+use crate::app::environment::Environment;
 /// Python 框架检测
 ///
 /// 对齐 railpack `core/providers/python/python.go` 中的框架检测部分
-
 use crate::app::App;
-use crate::app::environment::Environment;
 
 /// 检测到的框架
 #[derive(Debug, Clone)]
@@ -14,7 +13,12 @@ pub struct PythonFramework {
 
 /// Python 入口文件列表
 const ENTRY_FILES: &[&str] = &[
-    "main.py", "app.py", "start.py", "bot.py", "hello.py", "server.py",
+    "main.py",
+    "app.py",
+    "start.py",
+    "bot.py",
+    "hello.py",
+    "server.py",
 ];
 
 /// 检测入口文件
@@ -35,8 +39,8 @@ pub fn detect_framework(
 ) -> Option<PythonFramework> {
     // Django
     if super::django::is_django(app, dependencies) {
-        let wsgi_module = super::django::get_wsgi_module(app, env)
-            .unwrap_or_else(|| "config.wsgi".to_string());
+        let wsgi_module =
+            super::django::get_wsgi_module(app, env).unwrap_or_else(|| "config.wsgi".to_string());
         return Some(PythonFramework {
             name: "django".to_string(),
             start_cmd: format!(

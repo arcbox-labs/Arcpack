@@ -3,15 +3,14 @@
 /// 对齐 railpack `core/providers/python/python.go`
 /// 自动检测 Django/FastAPI/Flask/FastHTML 框架，
 /// 自动处理 APT 构建/运行时依赖和 secrets 前缀过滤。
-
 pub mod django;
 pub mod frameworks;
 pub mod package_manager;
 
 use std::collections::HashMap;
 
-use crate::app::App;
 use crate::app::environment::Environment;
+use crate::app::App;
 use crate::generate::command_step_builder::CommandStepBuilder;
 use crate::generate::mise_step_builder::{self, MiseStepBuilder};
 use crate::generate::GenerateContext;
@@ -26,7 +25,12 @@ const DEFAULT_PYTHON_VERSION: &str = "3.13";
 
 /// Python 入口文件（用于 detect）
 const PYTHON_ENTRY_FILES: &[&str] = &[
-    "main.py", "app.py", "start.py", "bot.py", "hello.py", "server.py",
+    "main.py",
+    "app.py",
+    "start.py",
+    "bot.py",
+    "hello.py",
+    "server.py",
 ];
 
 /// APT 构建依赖映射
@@ -75,7 +79,8 @@ impl PythonProvider {
                         .filter(|l| !l.trim().is_empty() && !l.trim().starts_with('#'))
                         .map(|l| {
                             // 提取包名（去除版本限制符）
-                            let name = l.trim()
+                            let name = l
+                                .trim()
                                 .split(&['=', '>', '<', '!', '~', '['][..])
                                 .next()
                                 .unwrap_or("")
@@ -133,7 +138,9 @@ impl PythonProvider {
         for line in content.lines() {
             let trimmed = line.trim();
             // [project.dependencies] 或 [tool.poetry.dependencies]
-            if trimmed == "dependencies = [" || trimmed.contains("dependencies") && trimmed.contains('[') {
+            if trimmed == "dependencies = ["
+                || trimmed.contains("dependencies") && trimmed.contains('[')
+            {
                 in_deps = true;
                 continue;
             }
@@ -201,9 +208,7 @@ impl PythonProvider {
         for (pkg, apt_pkg) in BUILD_APT_DEPS {
             if dependencies.iter().any(|d| d == *pkg) {
                 // psycopg2-binary 不需要 libpq-dev
-                if *pkg == "psycopg2"
-                    && dependencies.iter().any(|d| d == "psycopg2-binary")
-                {
+                if *pkg == "psycopg2" && dependencies.iter().any(|d| d == "psycopg2-binary") {
                     continue;
                 }
                 apt_deps.push(apt_pkg.to_string());
@@ -217,9 +222,7 @@ impl PythonProvider {
         let mut apt_deps = Vec::new();
         for (pkg, apt_pkg) in RUNTIME_APT_DEPS {
             if dependencies.iter().any(|d| d == *pkg) {
-                if *pkg == "psycopg2"
-                    && dependencies.iter().any(|d| d == "psycopg2-binary")
-                {
+                if *pkg == "psycopg2" && dependencies.iter().any(|d| d == "psycopg2-binary") {
                     continue;
                 }
                 apt_deps.push(apt_pkg.to_string());
@@ -271,10 +274,8 @@ impl Provider for PythonProvider {
 
     fn initialize(&mut self, ctx: &mut GenerateContext) -> Result<()> {
         self.package_manager = package_manager::detect_package_manager(&ctx.app);
-        self.dependencies =
-            Self::read_dependencies(&ctx.app, &self.package_manager);
-        self.framework =
-            frameworks::detect_framework(&ctx.app, &ctx.env, &self.dependencies);
+        self.dependencies = Self::read_dependencies(&ctx.app, &self.package_manager);
+        self.framework = frameworks::detect_framework(&ctx.app, &ctx.env, &self.dependencies);
         self.python_version = Self::resolve_version(&ctx.app, &ctx.env);
 
         Ok(())
@@ -295,28 +296,19 @@ impl Provider for PythonProvider {
 
         {
             let mise = ctx.mise_step_builder.as_mut().unwrap();
-            let python_ref = mise.default_package(
-                &mut ctx.resolver,
-                "python",
-                DEFAULT_PYTHON_VERSION,
-            );
+            let python_ref =
+                mise.default_package(&mut ctx.resolver, "python", DEFAULT_PYTHON_VERSION);
             mise.version(
                 &mut ctx.resolver,
                 &python_ref,
                 &self.python_version,
                 "resolved",
             );
-            mise.variables.insert(
-                "MISE_PYTHON_COMPILE".to_string(),
-                "false".to_string(),
-            );
+            mise.variables
+                .insert("MISE_PYTHON_COMPILE".to_string(), "false".to_string());
 
             // 包管理器工具
-            package_manager::setup_mise_packages(
-                &self.package_manager,
-                mise,
-                &mut ctx.resolver,
-            );
+            package_manager::setup_mise_packages(&self.package_manager, mise, &mut ctx.resolver);
 
             // APT 构建依赖
             let build_apt = Self::detect_build_apt_deps(&self.dependencies);
@@ -339,9 +331,10 @@ impl Provider for PythonProvider {
             let install = Self::get_command_step(&mut ctx.steps, "install");
 
             // Venv 配置
-            install.add_variables(&HashMap::from([
-                ("VIRTUAL_ENV".to_string(), "/app/.venv".to_string()),
-            ]));
+            install.add_variables(&HashMap::from([(
+                "VIRTUAL_ENV".to_string(),
+                "/app/.venv".to_string(),
+            )]));
             install.add_paths(&["/app/.venv/bin".to_string()]);
 
             // Secrets 前缀过滤
@@ -378,9 +371,7 @@ impl Provider for PythonProvider {
 
             // uv 模式：在 build 步骤中运行额外同步
             if self.package_manager == PythonPackageManager::Uv {
-                build.add_command(Command::new_exec(
-                    "uv sync --locked --no-dev --no-editable",
-                ));
+                build.add_command(Command::new_exec("uv sync --locked --no-dev --no-editable"));
             }
         }
 
@@ -395,10 +386,7 @@ impl Provider for PythonProvider {
             ("PYTHONUNBUFFERED".to_string(), "1".to_string()),
             ("PYTHONHASHSEED".to_string(), "random".to_string()),
             ("PYTHONDONTWRITEBYTECODE".to_string(), "1".to_string()),
-            (
-                "PIP_DISABLE_PIP_VERSION_CHECK".to_string(),
-                "1".to_string(),
-            ),
+            ("PIP_DISABLE_PIP_VERSION_CHECK".to_string(), "1".to_string()),
             ("PIP_DEFAULT_TIMEOUT".to_string(), "100".to_string()),
         ]);
         for (k, v) in &deploy_vars {
@@ -428,10 +416,11 @@ impl Provider for PythonProvider {
 
         let venv_layer = Layer::new_step_layer(
             "build",
-            Some(Filter::include_only(vec![".venv".to_string()])),
+            Some(Filter::include_only(vec!["/app/.venv".to_string()])),
         );
 
-        ctx.deploy.add_inputs(&[mise_layer, venv_layer, build_layer]);
+        ctx.deploy
+            .add_inputs(&[mise_layer, venv_layer, build_layer]);
 
         Ok(())
     }
@@ -565,10 +554,7 @@ mod tests {
 
     #[test]
     fn test_build_apt_deps_psycopg2_binary_excluded() {
-        let deps = vec![
-            "psycopg2".to_string(),
-            "psycopg2-binary".to_string(),
-        ];
+        let deps = vec!["psycopg2".to_string(), "psycopg2-binary".to_string()];
         let apt = PythonProvider::detect_build_apt_deps(&deps);
         assert!(!apt.contains(&"libpq-dev".to_string()));
     }
@@ -627,17 +613,18 @@ mod tests {
         assert!(step_names.contains(&"install"));
         assert!(step_names.contains(&"build"));
 
-        assert_eq!(
-            ctx.metadata.get("pythonPackageManager"),
-            Some("pip")
-        );
+        assert_eq!(ctx.metadata.get("pythonPackageManager"), Some("pip"));
         assert_eq!(ctx.metadata.get("pythonRuntime"), Some("flask"));
     }
 
     #[test]
     fn test_plan_uv_basic() {
         let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("pyproject.toml"), "[project]\nname = \"app\"").unwrap();
+        fs::write(
+            dir.path().join("pyproject.toml"),
+            "[project]\nname = \"app\"",
+        )
+        .unwrap();
         fs::write(dir.path().join("uv.lock"), "").unwrap();
         fs::write(dir.path().join("main.py"), "").unwrap();
 
@@ -646,10 +633,7 @@ mod tests {
         provider.initialize(&mut ctx).unwrap();
         provider.plan(&mut ctx).unwrap();
 
-        assert_eq!(
-            ctx.metadata.get("pythonPackageManager"),
-            Some("uv")
-        );
+        assert_eq!(ctx.metadata.get("pythonPackageManager"), Some("uv"));
     }
 
     #[test]
@@ -674,12 +658,7 @@ mod tests {
         provider.plan(&mut ctx).unwrap();
 
         assert_eq!(ctx.metadata.get("pythonRuntime"), Some("django"));
-        assert!(ctx
-            .deploy
-            .start_cmd
-            .as_ref()
-            .unwrap()
-            .contains("gunicorn"));
+        assert!(ctx.deploy.start_cmd.as_ref().unwrap().contains("gunicorn"));
         assert!(ctx
             .deploy
             .start_cmd
@@ -703,11 +682,6 @@ mod tests {
         provider.plan(&mut ctx).unwrap();
 
         assert_eq!(ctx.metadata.get("pythonRuntime"), Some("fastapi"));
-        assert!(ctx
-            .deploy
-            .start_cmd
-            .as_ref()
-            .unwrap()
-            .contains("uvicorn"));
+        assert!(ctx.deploy.start_cmd.as_ref().unwrap().contains("uvicorn"));
     }
 }

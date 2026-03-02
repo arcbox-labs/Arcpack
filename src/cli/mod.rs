@@ -1,21 +1,20 @@
 /// CLI 模块 —— 命令行界面定义与命令实现
 ///
 /// 对齐 railpack `cmd/cli/main.go`
-
 pub mod build;
 pub mod common;
-pub mod plan;
 pub mod info;
-pub mod schema;
+pub mod plan;
 pub mod prepare;
 pub mod pretty_print;
+pub mod schema;
 
 pub mod frontend;
 
-use clap::{Parser, Subcommand, ArgAction};
+use clap::{ArgAction, Parser, Subcommand};
 
-use self::plan::PlanArgs;
 use self::info::InfoArgs;
+use self::plan::PlanArgs;
 use self::prepare::PrepareArgs;
 
 /// arcpack — 零配置应用构建器

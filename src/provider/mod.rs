@@ -14,8 +14,8 @@ pub mod rust_lang;
 pub mod shell;
 pub mod staticfile;
 
-use crate::app::App;
 use crate::app::environment::Environment;
+use crate::app::App;
 use crate::generate::GenerateContext;
 use crate::plan::BuildPlan;
 use crate::Result;
@@ -88,8 +88,20 @@ mod tests {
         assert_eq!(
             names,
             vec![
-                "php", "golang", "java", "rust", "ruby", "elixir", "python",
-                "deno", "dotnet", "node", "gleam", "cpp", "staticfile", "shell"
+                "php",
+                "golang",
+                "java",
+                "rust",
+                "ruby",
+                "elixir",
+                "python",
+                "deno",
+                "dotnet",
+                "node",
+                "gleam",
+                "cpp",
+                "staticfile",
+                "shell"
             ]
         );
     }
@@ -97,10 +109,26 @@ mod tests {
     #[test]
     fn test_get_provider_by_name() {
         for name in &[
-            "php", "golang", "java", "rust", "ruby", "elixir", "python",
-            "deno", "dotnet", "node", "gleam", "cpp", "staticfile", "shell",
+            "php",
+            "golang",
+            "java",
+            "rust",
+            "ruby",
+            "elixir",
+            "python",
+            "deno",
+            "dotnet",
+            "node",
+            "gleam",
+            "cpp",
+            "staticfile",
+            "shell",
         ] {
-            assert!(get_provider(name).is_some(), "provider '{}' not found", name);
+            assert!(
+                get_provider(name).is_some(),
+                "provider '{}' not found",
+                name
+            );
         }
     }
 
@@ -113,9 +141,15 @@ mod tests {
     fn test_default_trait_methods_no_panic() {
         struct DummyProvider;
         impl Provider for DummyProvider {
-            fn name(&self) -> &str { "dummy" }
-            fn detect(&self, _app: &App, _env: &Environment) -> Result<bool> { Ok(false) }
-            fn plan(&self, _ctx: &mut GenerateContext) -> Result<()> { Ok(()) }
+            fn name(&self) -> &str {
+                "dummy"
+            }
+            fn detect(&self, _app: &App, _env: &Environment) -> Result<bool> {
+                Ok(false)
+            }
+            fn plan(&self, _ctx: &mut GenerateContext) -> Result<()> {
+                Ok(())
+            }
         }
 
         let p = DummyProvider;

@@ -1,13 +1,12 @@
+use crate::app::environment::Environment;
 /// Gradle 构建路径
 ///
 /// 对齐 railpack `core/providers/java/gradle.go`
-
 use crate::app::App;
-use crate::app::environment::Environment;
 use crate::generate::command_step_builder::CommandStepBuilder;
+use crate::generate::mise_step_builder::MiseStepBuilder;
 use crate::plan::Command;
 use crate::resolver::Resolver;
-use crate::generate::mise_step_builder::MiseStepBuilder;
 
 /// 默认 Gradle 版本
 const DEFAULT_GRADLE_VERSION: &str = "8";
